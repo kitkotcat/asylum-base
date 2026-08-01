@@ -47,6 +47,57 @@ def simple_back_keyboard(*, url: str = "", label: str = "Открыть") -> Inl
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def promos_keyboard(
+    *,
+    promo_id: int,
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    navigation: list[InlineKeyboardButton] = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="◀️",
+                callback_data=f"promos:p:{page - 1}",
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            text=f"{page + 1}/{max(total_pages, 1)}",
+            callback_data="promos:noop",
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                text="▶️",
+                callback_data=f"promos:p:{page + 1}",
+            )
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            navigation,
+            [
+                InlineKeyboardButton(
+                    text="✅ Работает",
+                    callback_data=f"promo:vote:{promo_id}:1",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Не работает",
+                    callback_data=f"promo:vote:{promo_id}:-1",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏠 Главное меню",
+                    callback_data="menu:home",
+                )
+            ],
+        ]
+    )
+
+
 def promo_vote_keyboard(promo_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
