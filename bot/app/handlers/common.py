@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
@@ -40,11 +41,23 @@ def _welcome_text() -> str:
 @router.message(CommandStart())
 async def start(message: Message, settings: Settings, db: Database) -> None:
     await _remember_user(message, db)
-    menu_message = await message.answer(
-        "Открываю меню…",
+
+    # ReplyKeyboardRemove and InlineKeyboardMarkup cannot be sent together.
+    # Remove the legacy reply keyboard with a short-lived message, then send
+    # the real menu as a separate bot message. Editing the temporary message
+    # proved unreliable in production Telegram clients.
+    cleanup_message = await message.answer(
+        "Обновляю меню…",
         reply_markup=ReplyKeyboardRemove(),
     )
-    await menu_message.edit_text(
+    try:
+        await cleanup_message.delete()
+    except TelegramAPIError:
+        # The menu must still open even if Telegram refuses to delete the
+        # temporary message (for example, because it was already removed).
+        pass
+
+    await message.answer(
         _welcome_text(),
         reply_markup=main_menu(community_url=settings.community_url),
     )
