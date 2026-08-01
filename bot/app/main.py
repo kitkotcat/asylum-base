@@ -7,94 +7,73 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 
-from bot.app.config import load_settings
+from bot.app.config import Settings, load_settings
 from bot.app.db import Database
 from bot.app.handlers import register_routers
+from bot.app.services.content_db import init_content_schema
 from bot.app.services.scheduler import run_scheduler
 
 
-async def set_commands(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(
-                command="start",
-                description="Открыть главное меню",
-            ),
-            BotCommand(
-                command="promocodes",
-                description="Активные промокоды",
-            ),
-            BotCommand(
-                command="topup",
-                description="Пополнения и скидки",
-            ),
-            BotCommand(
-                command="news",
-                description="Свежие новости",
-            ),
-            BotCommand(
-                command="submit",
-                description="Предложить информацию",
-            ),
-            BotCommand(
-                command="radar_status",
-                description="Статус Content Radar",
-            ),
-            BotCommand(
-                command="radar_check",
-                description="Проверить источники",
-            ),
-            BotCommand(
-                command="lootbar_prices",
-                description="Проверить цены LootBar",
-            ),
-            BotCommand(
-                command="id",
-                description="Показать ID чата и темы",
-            ),
-            BotCommand(
-                command="help",
-                description="Помощь",
-            ),
-        ]
-    )
+PUBLIC_COMMANDS = [
+    BotCommand(command="start", description="Главное меню"),
+    BotCommand(command="deals", description="Актуальные скидки"),
+    BotCommand(command="promocodes", description="Активные промокоды"),
+    BotCommand(command="news", description="Последние новости"),
+    BotCommand(command="guides", description="Гайды по игре"),
+    BotCommand(command="help", description="Помощь"),
+]
+
+ADMIN_COMMANDS = PUBLIC_COMMANDS + [
+    BotCommand(command="admin", description="Админ-панель"),
+    BotCommand(command="radar_status", description="Статус источников"),
+    BotCommand(command="radar_check", description="Проверить источники"),
+    BotCommand(command="report", description="Статистика"),
+    BotCommand(command="promo_add", description="Добавить промокод"),
+    BotCommand(command="promo_expire", description="Отключить промокод"),
+    BotCommand(command="post", description="Ручная публикация"),
+    BotCommand(command="id", description="ID чата и темы"),
+]
+
+
+async def set_commands(bot: Bot, settings: Settings) -> None:
+    await bot.set_my_commands(PUBLIC_COMMANDS, scope=BotCommandScopeDefault())
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.set_my_commands(
+                ADMIN_COMMANDS,
+                scope=BotCommandScopeChat(chat_id=admin_id),
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Не удалось установить команды администратора %s", admin_id
+            )
 
 
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format=(
-            "%(asctime)s | %(levelname)s | "
-            "%(name)s | %(message)s"
-        ),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
     settings = load_settings()
     db = Database(settings.db_path)
     await db.init()
+    await init_content_schema(db)
 
     bot = Bot(
         token=settings.bot_token,
-        default=DefaultBotProperties(
-            parse_mode=ParseMode.HTML
-        ),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dispatcher = Dispatcher()
     register_routers(dispatcher)
 
-    await bot.delete_webhook(
-        drop_pending_updates=True
-    )
-    await set_commands(bot)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await set_commands(bot, settings)
 
     scheduler_task = asyncio.create_task(
-        run_scheduler(
-            bot=bot,
-            settings=settings,
-            db=db,
-        )
+        run_scheduler(bot=bot, settings=settings, db=db)
     )
 
     try:
@@ -102,18 +81,12 @@ async def main() -> None:
             bot,
             settings=settings,
             db=db,
-            allowed_updates=(
-                dispatcher.resolve_used_update_types()
-            ),
+            allowed_updates=dispatcher.resolve_used_update_types(),
         )
     finally:
         scheduler_task.cancel()
-
-        with contextlib.suppress(
-            asyncio.CancelledError
-        ):
+        with contextlib.suppress(asyncio.CancelledError):
             await scheduler_task
-
         await bot.session.close()
 
 
