@@ -973,6 +973,7 @@ class Database:
                     events.append(
                         {
                             "change_type": change_type,
+                            "package_key": package_key,
                             **values,
                             "old_promo_price_minor": old_promo,
                             "old_regular_price_minor": old_regular,
@@ -1049,6 +1050,7 @@ class Database:
                 events.append(
                     {
                         "change_type": "removed",
+                        "package_key": package_key,
                         **values,
                         "old_promo_price_minor": values[
                             "promo_price_minor"

@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 import httpx
 
 from bot.app.db import Database
+from bot.app.services.content_db import save_draft_payload, save_lootbar_assets
 from bot.app.services.parsers import SourceCheckResult
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ HTTP_HEADERS = {
     "Accept-Language": "en-US",
     "Referer": "https://www.lootbar.com/",
     "User-Agent": (
-        "Mozilla/5.0 (compatible; AsylumBaseBot/0.2.3; "
+        "Mozilla/5.0 (compatible; AsylumBaseBot/0.3.0; "
         "+https://github.com/kitkotcat/asylum-base)"
     ),
 }
@@ -49,6 +50,7 @@ class LootbarPackage:
     discount_badge: str
     coupon_name: str
     sell_order_id: str
+    icon_url: str
 
 
 def _minor_units(value: Any, *, field_name: str) -> int:
@@ -378,6 +380,7 @@ def parse_lootbar_api(
             discount_badge=_string(discount_info.get("badge_text")),
             coupon_name=_string(coupon.get("name")),
             sell_order_id=sell_order_id,
+            icon_url=_string(info.get("icon")),
         )
         packages[sku_id] = package
 
@@ -527,15 +530,19 @@ async def check_lootbar_packages(
     *,
     page_url: str,
     affiliate_url: str,
+    min_price_drop_percent: float = 5.0,
+    min_savings_increase_cents: int = 50,
 ) -> SourceCheckResult:
     packages = await fetch_lootbar_packages()
     package_dicts = [asdict(package) for package in packages]
+    by_key = {package.package_key: package for package in packages}
 
     is_baseline, events = await db.sync_lootbar_packages(
         page_url,
         package_dicts,
         remove_after_misses=3,
     )
+    await save_lootbar_assets(db, package_dicts)
 
     if is_baseline or not events:
         return SourceCheckResult(
@@ -543,25 +550,92 @@ async def check_lootbar_packages(
             items_count=len(packages),
         )
 
-    summary = render_lootbar_changes(events)
-    event_signature = hashlib.sha256(
-        json.dumps(
-            events,
-            ensure_ascii=False,
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    created_ids: list[int] = []
 
-    draft_id = await db.create_draft(
-        kind="topup",
-        source_url=page_url,
-        item_uid=f"lootbar-api:{event_signature}",
-        title=f"Изменения LootBar: {len(events)}",
-        link=affiliate_url or page_url,
-        summary=summary,
-    )
+    for event in events:
+        change_type = str(event.get("change_type") or "")
+        package_key = str(event.get("package_key") or "")
+        package = by_key.get(package_key)
+
+        old_promo_raw = event.get("old_promo_price_minor")
+        new_promo_raw = event.get("promo_price_minor")
+        old_savings_raw = event.get("old_official_price_minor")
+
+        auto_eligible = False
+        price_drop_percent = 0.0
+        savings_increase = 0
+
+        if (
+            change_type == "price_changed"
+            and old_promo_raw is not None
+            and new_promo_raw is not None
+            and int(new_promo_raw) < int(old_promo_raw)
+        ):
+            old_promo = int(old_promo_raw)
+            new_promo = int(new_promo_raw)
+            price_drop_percent = (old_promo - new_promo) * 100.0 / max(old_promo, 1)
+
+            old_official = int(event.get("old_official_price_minor") or event.get("official_price_minor") or 0)
+            old_savings = max(old_official - old_promo, 0)
+            new_savings = int(event.get("savings_minor") or 0)
+            savings_increase = new_savings - old_savings
+            auto_eligible = (
+                price_drop_percent >= min_price_drop_percent
+                or savings_increase >= min_savings_increase_cents
+            )
+
+        review_worthy = auto_eligible or change_type in {"added", "restored"}
+        if not review_worthy or package is None:
+            continue
+
+        signature_payload = {
+            "package_key": package.package_key,
+            "change_type": change_type,
+            "promo": package.promo_price_minor,
+            "regular": package.regular_price_minor,
+            "official": package.official_price_minor,
+            "coupon": package.coupon_name,
+        }
+        signature = hashlib.sha256(
+            json.dumps(signature_payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        title = (
+            f"Цена снизилась: {package.name}"
+            if change_type == "price_changed"
+            else f"Новое предложение: {package.name}"
+            if change_type == "added"
+            else f"Предложение снова доступно: {package.name}"
+        )
+        summary = render_lootbar_changes([event])
+        draft_id = await db.create_draft(
+            kind="deal",
+            source_url=page_url,
+            item_uid=f"lootbar-deal:{signature}",
+            title=title,
+            link=affiliate_url or page_url,
+            summary=summary,
+        )
+        if draft_id is None:
+            continue
+
+        await save_draft_payload(
+            db,
+            draft_id,
+            image_url=package.icon_url,
+            entity_key=package.package_key,
+            metadata={
+                **asdict(package),
+                "change_type": change_type,
+                "old_promo_price_minor": old_promo_raw,
+                "price_drop_percent": round(price_drop_percent, 2),
+                "savings_increase_minor": savings_increase,
+                "auto_eligible": auto_eligible,
+            },
+        )
+        created_ids.append(draft_id)
 
     return SourceCheckResult(
-        draft_ids=() if draft_id is None else (draft_id,),
+        draft_ids=tuple(created_ids),
         items_count=len(packages),
     )

@@ -14,12 +14,13 @@ import httpx
 from bs4 import BeautifulSoup
 
 from bot.app.db import Database
+from bot.app.services.content_db import save_draft_payload
 
 logger = logging.getLogger(__name__)
 
 HTTP_HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; AsylumBaseBot/0.2.2; "
+        "Mozilla/5.0 (compatible; AsylumBaseBot/0.3.0; "
         "+https://github.com/kitkotcat/asylum-base)"
     )
 }
@@ -141,6 +142,15 @@ async def collect_rss_feed_drafts(
             )
 
             if draft_id is not None:
+                await save_draft_payload(
+                    db,
+                    draft_id,
+                    entity_key=item.uid,
+                    metadata={
+                        "content_type": "rss_news",
+                        "source_url": item.source_url,
+                    },
+                )
                 created_ids.append(draft_id)
 
         await db.save_source_item(
@@ -379,7 +389,7 @@ async def check_google_play_update(
         return SourceCheckResult((), 1)
 
     draft_id = await db.create_draft(
-        kind="news",
+        kind="google_play",
         source_url=url,
         item_uid=f"google-play:{signature}",
         title=(
@@ -393,6 +403,18 @@ async def check_google_play_update(
             "Проверьте описание перед публикацией."
         ),
     )
+
+    if draft_id is not None:
+        await save_draft_payload(
+            db,
+            draft_id,
+            entity_key="google-play:last-asylum",
+            metadata={
+                "content_type": "google_play",
+                "updated_on": updated_on,
+                "whats_new": whats_new,
+            },
+        )
 
     return SourceCheckResult(
         draft_ids=() if draft_id is None else (draft_id,),
