@@ -97,3 +97,52 @@ def test_publication_queue_and_duplicate_protection(tmp_path: Path) -> None:
         assert await publication_exists(db, content_key) is True
 
     asyncio.run(scenario())
+
+
+def test_start_sends_menu_after_removing_legacy_keyboard() -> None:
+    from types import SimpleNamespace
+
+    from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardRemove
+
+    from bot.app.handlers.common import start
+
+    class FakeDatabase:
+        async def upsert_user(self, **_kwargs: object) -> None:
+            return None
+
+    class FakeCleanupMessage:
+        def __init__(self) -> None:
+            self.deleted = False
+
+        async def delete(self) -> None:
+            self.deleted = True
+
+    class FakeMessage:
+        def __init__(self) -> None:
+            self.from_user = SimpleNamespace(
+                id=1,
+                username="tester",
+                first_name="Test",
+            )
+            self.calls: list[tuple[str, object]] = []
+            self.cleanup = FakeCleanupMessage()
+
+        async def answer(self, text: str, *, reply_markup: object = None):
+            self.calls.append((text, reply_markup))
+            if len(self.calls) == 1:
+                return self.cleanup
+            return SimpleNamespace()
+
+    async def scenario() -> None:
+        message = FakeMessage()
+        settings = SimpleNamespace(community_url="https://t.me/example")
+
+        await start(message, settings, FakeDatabase())
+
+        assert len(message.calls) == 2
+        assert isinstance(message.calls[0][1], ReplyKeyboardRemove)
+        assert message.cleanup.deleted is True
+        assert "Asylum Base" in message.calls[1][0]
+        assert isinstance(message.calls[1][1], InlineKeyboardMarkup)
+
+    asyncio.run(scenario())
