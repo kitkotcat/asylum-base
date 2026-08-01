@@ -10,6 +10,7 @@ from bot.app.config import Settings
 from bot.app.db import Database
 from bot.app.services.parsers import render_public_post
 from bot.app.services.publisher import publish
+from bot.app.services.scheduler import run_radar_once
 
 router = Router(name=__name__)
 
@@ -19,11 +20,7 @@ def _is_admin(user_id: int | None, settings: Settings) -> bool:
 
 
 @router.message(Command("promo_add"))
-async def promo_add(
-    message: Message,
-    settings: Settings,
-    db: Database,
-) -> None:
+async def promo_add(message: Message, settings: Settings, db: Database) -> None:
     user_id = message.from_user.id if message.from_user else None
     if not _is_admin(user_id, settings):
         await message.answer("Команда доступна только администратору.")
@@ -32,16 +29,45 @@ async def promo_add(
     payload = (message.text or "").partition(" ")[2].strip()
     parts = [part.strip() for part in payload.split("|")]
     if len(parts) != 3 or not all(parts):
-        await message.answer(
-            "Формат:\n"
-            "<code>/promo_add CODE | Награда | Источник</code>"
-        )
+        await message.answer("Формат:\n<code>/promo_add CODE | Награда | Источник</code>")
         return
 
     code, reward, source = parts
     promo_id = await db.add_promo(code, reward, source)
+    await message.answer(f"✅ Промокод сохранён. ID: <code>{promo_id}</code>")
+
+
+@router.message(Command("radar_status"))
+async def radar_status(message: Message, settings: Settings) -> None:
+    user_id = message.from_user.id if message.from_user else None
+    if not _is_admin(user_id, settings):
+        await message.answer("Команда доступна только администратору.")
+        return
+
     await message.answer(
-        f"✅ Промокод сохранён. ID: <code>{promo_id}</code>"
+        "📡 <b>Content Radar</b>\n\n"
+        f"RSS-источников: <b>{len(settings.rss_feed_urls)}</b>\n"
+        f"LootBar monitor: <b>{'ON' if settings.lootbar_page_url else 'OFF'}</b>\n"
+        f"Google Play monitor: <b>{'ON' if settings.google_play_url else 'OFF'}</b>\n"
+        f"Интервал: <b>{settings.parser_interval_minutes} мин.</b>\n\n"
+        "Новые материалы сначала приходят администраторам как черновики."
+    )
+
+
+@router.message(Command("radar_check"))
+async def radar_check(message: Message, settings: Settings, db: Database) -> None:
+    user_id = message.from_user.id if message.from_user else None
+    if not _is_admin(user_id, settings):
+        await message.answer("Команда доступна только администратору.")
+        return
+
+    status_message = await message.answer("🔎 Проверяю источники…")
+    draft_ids = await run_radar_once(bot=message.bot, settings=settings, db=db)
+    await status_message.edit_text(
+        "✅ Проверка завершена.\n"
+        f"Новых черновиков: <b>{len(draft_ids)}</b>\n\n"
+        "При первом запуске бот создаёт базовую отметку "
+        "и не присылает старые материалы."
     )
 
 
@@ -67,12 +93,7 @@ async def manual_post(message: Message, settings: Settings) -> None:
         return
 
     try:
-        await publish(
-            bot=message.bot,
-            settings=settings,
-            kind=kind,
-            text=html.escape(text),
-        )
+        await publish(bot=message.bot, settings=settings, kind=kind, text=html.escape(text))
     except RuntimeError as exc:
         await message.answer(f"⚠️ {html.escape(str(exc))}")
         return
@@ -81,11 +102,7 @@ async def manual_post(message: Message, settings: Settings) -> None:
 
 
 @router.callback_query(F.data.startswith("draft:"))
-async def moderate_draft(
-    callback: CallbackQuery,
-    settings: Settings,
-    db: Database,
-) -> None:
+async def moderate_draft(callback: CallbackQuery, settings: Settings, db: Database) -> None:
     if not _is_admin(callback.from_user.id, settings):
         await callback.answer("Недостаточно прав", show_alert=True)
         return

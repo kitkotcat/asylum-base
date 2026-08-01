@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
 
 import aiosqlite
 
@@ -16,24 +14,18 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    @asynccontextmanager
-    async def connection(self) -> AsyncIterator[aiosqlite.Connection]:
-        db = await aiosqlite.connect(self.path)
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute("PRAGMA busy_timeout=5000")
-        try:
-            yield db
-        finally:
-            await db.close()
+    async def connect(self) -> aiosqlite.Connection:
+        connection = await aiosqlite.connect(self.path)
+        connection.row_factory = aiosqlite.Row
+        await connection.execute("PRAGMA journal_mode=WAL")
+        await connection.execute("PRAGMA foreign_keys=ON")
+        return connection
 
     async def init(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        async with self.connection() as db:
+        async with await self.connect() as db:
             await db.executescript(
                 """
-                PRAGMA journal_mode=WAL;
-
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id INTEGER PRIMARY KEY,
                     username TEXT,
@@ -64,8 +56,15 @@ class Database:
                     vote INTEGER NOT NULL CHECK(vote IN (-1, 1)),
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (promo_id, telegram_id),
-                    FOREIGN KEY (promo_id)
-                        REFERENCES promo_codes(id) ON DELETE CASCADE
+                    FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS source_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_url TEXT NOT NULL,
+                    item_uid TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(source_url, item_uid)
                 );
 
                 CREATE TABLE IF NOT EXISTS content_drafts (
@@ -90,20 +89,12 @@ class Database:
             )
             await db.commit()
 
-    async def upsert_user(
-        self,
-        telegram_id: int,
-        username: str | None,
-        first_name: str | None,
-    ) -> None:
+    async def upsert_user(self, telegram_id: int, username: str | None, first_name: str | None) -> None:
         now = utc_now()
-        async with self.connection() as db:
+        async with await self.connect() as db:
             await db.execute(
                 """
-                INSERT INTO users(
-                    telegram_id, username, first_name,
-                    created_at, last_seen_at
-                )
+                INSERT INTO users(telegram_id, username, first_name, created_at, last_seen_at)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(telegram_id) DO UPDATE SET
                     username=excluded.username,
@@ -114,72 +105,40 @@ class Database:
             )
             await db.commit()
 
-    async def log_referral_click(
-        self,
-        telegram_id: int,
-        campaign: str,
-    ) -> None:
-        async with self.connection() as db:
+    async def log_referral_click(self, telegram_id: int, campaign: str) -> None:
+        async with await self.connect() as db:
             await db.execute(
-                """
-                INSERT INTO referral_clicks(
-                    telegram_id, campaign, created_at
-                )
-                VALUES (?, ?, ?)
-                """,
+                "INSERT INTO referral_clicks(telegram_id, campaign, created_at) VALUES (?, ?, ?)",
                 (telegram_id, campaign, utc_now()),
             )
             await db.commit()
 
-    async def add_promo(
-        self,
-        code: str,
-        reward: str,
-        source: str,
-    ) -> int:
-        normalized_code = code.strip().upper()
-        async with self.connection() as db:
-            await db.execute(
+    async def add_promo(self, code: str, reward: str, source: str) -> int:
+        async with await self.connect() as db:
+            cursor = await db.execute(
                 """
-                INSERT INTO promo_codes(
-                    code, reward, source, is_active, created_at
-                )
-                VALUES (?, ?, ?, 1, ?)
+                INSERT INTO promo_codes(code, reward, source, created_at)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(code) DO UPDATE SET
                     reward=excluded.reward,
                     source=excluded.source,
                     is_active=1
+                RETURNING id
                 """,
-                (normalized_code, reward, source, utc_now()),
-            )
-            cursor = await db.execute(
-                "SELECT id FROM promo_codes WHERE code = ?",
-                (normalized_code,),
+                (code.upper(), reward, source, utc_now()),
             )
             row = await cursor.fetchone()
             await db.commit()
-            if row is None:
-                raise RuntimeError("Не удалось сохранить промокод")
             return int(row["id"])
 
-    async def list_active_promos(
-        self,
-        limit: int = 10,
-    ) -> list[aiosqlite.Row]:
-        async with self.connection() as db:
+    async def list_active_promos(self, limit: int = 10) -> list[aiosqlite.Row]:
+        async with await self.connect() as db:
             cursor = await db.execute(
                 """
                 SELECT
-                    p.id,
-                    p.code,
-                    p.reward,
-                    p.source,
-                    COALESCE(SUM(
-                        CASE WHEN v.vote = 1 THEN 1 ELSE 0 END
-                    ), 0) AS works,
-                    COALESCE(SUM(
-                        CASE WHEN v.vote = -1 THEN 1 ELSE 0 END
-                    ), 0) AS fails
+                    p.id, p.code, p.reward, p.source,
+                    COALESCE(SUM(CASE WHEN v.vote = 1 THEN 1 ELSE 0 END), 0) AS works,
+                    COALESCE(SUM(CASE WHEN v.vote = -1 THEN 1 ELSE 0 END), 0) AS fails
                 FROM promo_codes p
                 LEFT JOIN promo_votes v ON v.promo_id = p.id
                 WHERE p.is_active = 1
@@ -191,24 +150,41 @@ class Database:
             )
             return list(await cursor.fetchall())
 
-    async def vote_promo(
-        self,
-        promo_id: int,
-        telegram_id: int,
-        vote: int,
-    ) -> None:
-        async with self.connection() as db:
+    async def vote_promo(self, promo_id: int, telegram_id: int, vote: int) -> None:
+        async with await self.connect() as db:
             await db.execute(
                 """
-                INSERT INTO promo_votes(
-                    promo_id, telegram_id, vote, created_at
-                )
+                INSERT INTO promo_votes(promo_id, telegram_id, vote, created_at)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(promo_id, telegram_id) DO UPDATE SET
                     vote=excluded.vote,
                     created_at=excluded.created_at
                 """,
                 (promo_id, telegram_id, vote, utc_now()),
+            )
+            await db.commit()
+
+    async def has_source_items(self, source_url: str) -> bool:
+        async with await self.connect() as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM source_items WHERE source_url = ? LIMIT 1",
+                (source_url,),
+            )
+            return await cursor.fetchone() is not None
+
+    async def source_item_exists(self, source_url: str, item_uid: str) -> bool:
+        async with await self.connect() as db:
+            cursor = await db.execute(
+                "SELECT 1 FROM source_items WHERE source_url = ? AND item_uid = ?",
+                (source_url, item_uid),
+            )
+            return await cursor.fetchone() is not None
+
+    async def save_source_item(self, source_url: str, item_uid: str) -> None:
+        async with await self.connect() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO source_items(source_url, item_uid, created_at) VALUES (?, ?, ?)",
+                (source_url, item_uid, utc_now()),
             )
             await db.commit()
 
@@ -221,24 +197,15 @@ class Database:
         link: str,
         summary: str,
     ) -> int | None:
-        async with self.connection() as db:
+        async with await self.connect() as db:
             cursor = await db.execute(
                 """
                 INSERT OR IGNORE INTO content_drafts(
-                    kind, source_url, item_uid,
-                    title, link, summary, created_at
+                    kind, source_url, item_uid, title, link, summary, created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    kind,
-                    source_url,
-                    item_uid,
-                    title,
-                    link,
-                    summary,
-                    utc_now(),
-                ),
+                (kind, source_url, item_uid, title, link, summary, utc_now()),
             )
             await db.commit()
             if cursor.rowcount == 0:
@@ -246,40 +213,23 @@ class Database:
             return int(cursor.lastrowid)
 
     async def get_draft(self, draft_id: int) -> aiosqlite.Row | None:
-        async with self.connection() as db:
-            cursor = await db.execute(
-                "SELECT * FROM content_drafts WHERE id = ?",
-                (draft_id,),
-            )
+        async with await self.connect() as db:
+            cursor = await db.execute("SELECT * FROM content_drafts WHERE id = ?", (draft_id,))
             return await cursor.fetchone()
 
-    async def set_draft_status(
-        self,
-        draft_id: int,
-        status: str,
-    ) -> None:
-        async with self.connection() as db:
-            await db.execute(
-                "UPDATE content_drafts SET status = ? WHERE id = ?",
-                (status, draft_id),
-            )
+    async def set_draft_status(self, draft_id: int, status: str) -> None:
+        async with await self.connect() as db:
+            await db.execute("UPDATE content_drafts SET status = ? WHERE id = ?", (status, draft_id))
             await db.commit()
 
     async def get_snapshot_hash(self, url: str) -> str | None:
-        async with self.connection() as db:
-            cursor = await db.execute(
-                "SELECT content_hash FROM page_snapshots WHERE url = ?",
-                (url,),
-            )
+        async with await self.connect() as db:
+            cursor = await db.execute("SELECT content_hash FROM page_snapshots WHERE url = ?", (url,))
             row = await cursor.fetchone()
             return None if row is None else str(row["content_hash"])
 
-    async def save_snapshot_hash(
-        self,
-        url: str,
-        content_hash: str,
-    ) -> None:
-        async with self.connection() as db:
+    async def save_snapshot_hash(self, url: str, content_hash: str) -> None:
+        async with await self.connect() as db:
             await db.execute(
                 """
                 INSERT INTO page_snapshots(url, content_hash, updated_at)

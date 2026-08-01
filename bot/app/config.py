@@ -26,13 +26,9 @@ def _int_set(name: str) -> frozenset[int]:
     if not raw:
         return frozenset()
     try:
-        return frozenset(
-            int(item.strip()) for item in raw.split(",") if item.strip()
-        )
+        return frozenset(int(item.strip()) for item in raw.split(",") if item.strip())
     except ValueError as exc:
-        raise RuntimeError(
-            f"{name} должен содержать Telegram ID через запятую"
-        ) from exc
+        raise RuntimeError(f"{name} должен содержать Telegram ID через запятую") from exc
 
 
 def _url(name: str) -> str:
@@ -49,17 +45,16 @@ def _urls(name: str) -> tuple[str, ...]:
     raw = os.getenv(name, "").strip()
     if not raw:
         return ()
-
-    values: list[str] = []
-    for item in raw.split(","):
-        value = item.strip()
+    result: list[str] = []
+    for value in raw.split(","):
+        value = value.strip()
         if not value:
             continue
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise RuntimeError(f"Некорректная ссылка в {name}: {value}")
-        values.append(value)
-    return tuple(values)
+        result.append(value)
+    return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +67,7 @@ class Settings:
     topup_thread_id: int | None
     lootbar_affiliate_url: str
     lootbar_page_url: str
+    google_play_url: str
     rss_feed_urls: tuple[str, ...]
     parser_interval_minutes: int
     db_path: Path
@@ -86,17 +82,12 @@ def load_settings() -> Settings:
     try:
         interval = int(interval_raw)
     except ValueError as exc:
-        raise RuntimeError(
-            "PARSER_INTERVAL_MINUTES должен быть целым числом"
-        ) from exc
+        raise RuntimeError("PARSER_INTERVAL_MINUTES должен быть целым числом") from exc
     if interval < 5:
-        raise RuntimeError(
-            "PARSER_INTERVAL_MINUTES должен быть не меньше 5"
-        )
+        raise RuntimeError("PARSER_INTERVAL_MINUTES должен быть не меньше 5")
 
-    db_path = Path(
-        os.getenv("DB_PATH", "bot/data/asylum_base.db").strip()
-    )
+    db_path_raw = os.getenv("DB_PATH", "bot/data/asylum_base.db").strip()
+    db_path = Path(db_path_raw)
     if not db_path.is_absolute():
         db_path = PROJECT_ROOT / db_path
 
@@ -109,6 +100,7 @@ def load_settings() -> Settings:
         topup_thread_id=_optional_int("TOPUP_THREAD_ID"),
         lootbar_affiliate_url=_url("LOOTBAR_AFFILIATE_URL"),
         lootbar_page_url=_url("LOOTBAR_PAGE_URL"),
+        google_play_url=_url("GOOGLE_PLAY_URL"),
         rss_feed_urls=_urls("RSS_FEED_URLS"),
         parser_interval_minutes=interval,
         db_path=db_path,
