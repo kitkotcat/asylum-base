@@ -19,23 +19,13 @@ async def set_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Открыть главное меню"),
-            BotCommand(
-                command="promocodes",
-                description="Активные промокоды",
-            ),
-            BotCommand(
-                command="topup",
-                description="Пополнения и скидки",
-            ),
+            BotCommand(command="promocodes", description="Активные промокоды"),
+            BotCommand(command="topup", description="Пополнения и скидки"),
             BotCommand(command="news", description="Свежие новости"),
-            BotCommand(
-                command="submit",
-                description="Предложить информацию",
-            ),
-            BotCommand(
-                command="id",
-                description="Показать ID чата и темы",
-            ),
+            BotCommand(command="submit", description="Предложить информацию"),
+            BotCommand(command="radar_status", description="Статус Content Radar"),
+            BotCommand(command="radar_check", description="Проверить источники"),
+            BotCommand(command="id", description="Показать ID чата и темы"),
             BotCommand(command="help", description="Помощь"),
         ]
     )
@@ -44,10 +34,7 @@ async def set_commands(bot: Bot) -> None:
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format=(
-            "%(asctime)s | %(levelname)s | "
-            "%(name)s | %(message)s"
-        ),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
     settings = load_settings()

@@ -4,12 +4,12 @@ import asyncio
 import logging
 
 from aiogram import Bot
-from aiogram.types import LinkPreviewOptions
 
 from bot.app.config import Settings
 from bot.app.db import Database
 from bot.app.keyboards import draft_keyboard
 from bot.app.services.parsers import (
+    check_google_play_update,
     check_page_changed,
     collect_rss_drafts,
     render_draft,
@@ -18,7 +18,7 @@ from bot.app.services.parsers import (
 logger = logging.getLogger(__name__)
 
 
-async def _notify_admins(
+async def notify_admins(
     bot: Bot,
     settings: Settings,
     db: Database,
@@ -45,16 +45,55 @@ async def _notify_admins(
                     admin_id,
                     text,
                     reply_markup=draft_keyboard(draft_id),
-                    link_preview_options=LinkPreviewOptions(
-                        is_disabled=True
-                    ),
+                    disable_web_page_preview=True,
                 )
             except Exception:
                 logger.exception(
-                    "Не удалось отправить черновик %s админу %s",
+                    "Не удалось отправить черновик %s администратору %s",
                     draft_id,
                     admin_id,
                 )
+
+
+async def run_radar_once(
+    bot: Bot,
+    settings: Settings,
+    db: Database,
+) -> list[int]:
+    draft_ids: list[int] = []
+
+    try:
+        draft_ids.extend(await collect_rss_drafts(db, settings.rss_feed_urls))
+    except Exception:
+        logger.exception("Ошибка RSS-проверки")
+
+    try:
+        draft_id = await check_page_changed(
+            db,
+            settings.lootbar_page_url,
+            kind="topup",
+            title="Изменилась страница LootBar",
+            summary=(
+                "Бот обнаружил изменение страницы пополнения. "
+                "Проверьте цены, наборы и условия вручную перед публикацией."
+            ),
+        )
+        if draft_id is not None:
+            draft_ids.append(draft_id)
+    except Exception:
+        logger.exception("Ошибка мониторинга LootBar")
+
+    try:
+        draft_id = await check_google_play_update(db, settings.google_play_url)
+        if draft_id is not None:
+            draft_ids.append(draft_id)
+    except Exception:
+        logger.exception("Ошибка мониторинга Google Play")
+
+    if draft_ids:
+        await notify_admins(bot, settings, db, draft_ids)
+
+    return draft_ids
 
 
 async def run_scheduler(
@@ -63,28 +102,6 @@ async def run_scheduler(
     db: Database,
 ) -> None:
     await asyncio.sleep(10)
-
     while True:
-        draft_ids: list[int] = []
-
-        try:
-            draft_ids.extend(
-                await collect_rss_drafts(db, settings.rss_feed_urls)
-            )
-        except Exception:
-            logger.exception("Ошибка RSS-проверки")
-
-        try:
-            lootbar_draft_id = await check_page_changed(
-                db,
-                settings.lootbar_page_url,
-            )
-            if lootbar_draft_id is not None:
-                draft_ids.append(lootbar_draft_id)
-        except Exception:
-            logger.exception("Ошибка мониторинга LootBar")
-
-        if draft_ids:
-            await _notify_admins(bot, settings, db, draft_ids)
-
+        await run_radar_once(bot, settings, db)
         await asyncio.sleep(settings.parser_interval_minutes * 60)
