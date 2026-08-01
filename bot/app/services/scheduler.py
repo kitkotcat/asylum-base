@@ -12,10 +12,10 @@ from aiogram import Bot
 from bot.app.config import Settings
 from bot.app.db import Database
 from bot.app.keyboards import draft_keyboard
+from bot.app.services.lootbar import check_lootbar_packages
 from bot.app.services.parsers import (
     SourceCheckResult,
     check_google_play_update,
-    check_page_changed,
     collect_rss_feed_drafts,
     render_draft,
 )
@@ -101,9 +101,7 @@ async def _run_source(
         duration_ms = int(
             (monotonic() - started) * 1000
         )
-        error_text = (
-            f"{type(exc).__name__}: {exc}"
-        )
+        error_text = f"{type(exc).__name__}: {exc}"
 
         await db.mark_source_error(
             source_key,
@@ -179,16 +177,10 @@ async def run_radar_once(
                 db=db,
                 source_key="lootbar",
                 source_url=settings.lootbar_page_url,
-                check=lambda: check_page_changed(
+                check=lambda: check_lootbar_packages(
                     db,
-                    settings.lootbar_page_url,
-                    kind="topup",
-                    title="Изменилась страница LootBar",
-                    summary=(
-                        "Бот обнаружил изменение страницы "
-                        "пополнения. Проверьте цены, наборы "
-                        "и условия вручную перед публикацией."
-                    ),
+                    page_url=settings.lootbar_page_url,
+                    affiliate_url=settings.lootbar_affiliate_url,
                 ),
             )
             draft_ids.extend(source_drafts)

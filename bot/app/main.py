@@ -18,15 +18,46 @@ from bot.app.services.scheduler import run_scheduler
 async def set_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [
-            BotCommand(command="start", description="Открыть главное меню"),
-            BotCommand(command="promocodes", description="Активные промокоды"),
-            BotCommand(command="topup", description="Пополнения и скидки"),
-            BotCommand(command="news", description="Свежие новости"),
-            BotCommand(command="submit", description="Предложить информацию"),
-            BotCommand(command="radar_status", description="Статус Content Radar"),
-            BotCommand(command="radar_check", description="Проверить источники"),
-            BotCommand(command="id", description="Показать ID чата и темы"),
-            BotCommand(command="help", description="Помощь"),
+            BotCommand(
+                command="start",
+                description="Открыть главное меню",
+            ),
+            BotCommand(
+                command="promocodes",
+                description="Активные промокоды",
+            ),
+            BotCommand(
+                command="topup",
+                description="Пополнения и скидки",
+            ),
+            BotCommand(
+                command="news",
+                description="Свежие новости",
+            ),
+            BotCommand(
+                command="submit",
+                description="Предложить информацию",
+            ),
+            BotCommand(
+                command="radar_status",
+                description="Статус Content Radar",
+            ),
+            BotCommand(
+                command="radar_check",
+                description="Проверить источники",
+            ),
+            BotCommand(
+                command="lootbar_prices",
+                description="Проверить цены LootBar",
+            ),
+            BotCommand(
+                command="id",
+                description="Показать ID чата и темы",
+            ),
+            BotCommand(
+                command="help",
+                description="Помощь",
+            ),
         ]
     )
 
@@ -34,7 +65,10 @@ async def set_commands(bot: Bot) -> None:
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        format=(
+            "%(asctime)s | %(levelname)s | "
+            "%(name)s | %(message)s"
+        ),
     )
 
     settings = load_settings()
@@ -43,16 +77,24 @@ async def main() -> None:
 
     bot = Bot(
         token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML
+        ),
     )
     dispatcher = Dispatcher()
     register_routers(dispatcher)
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.delete_webhook(
+        drop_pending_updates=True
+    )
     await set_commands(bot)
 
     scheduler_task = asyncio.create_task(
-        run_scheduler(bot=bot, settings=settings, db=db)
+        run_scheduler(
+            bot=bot,
+            settings=settings,
+            db=db,
+        )
     )
 
     try:
@@ -60,12 +102,18 @@ async def main() -> None:
             bot,
             settings=settings,
             db=db,
-            allowed_updates=dispatcher.resolve_used_update_types(),
+            allowed_updates=(
+                dispatcher.resolve_used_update_types()
+            ),
         )
     finally:
         scheduler_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+
+        with contextlib.suppress(
+            asyncio.CancelledError
+        ):
             await scheduler_task
+
         await bot.session.close()
 
 

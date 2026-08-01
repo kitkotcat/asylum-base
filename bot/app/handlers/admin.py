@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -27,6 +28,18 @@ def _is_admin(
         and user_id in settings.admin_ids
     )
 
+
+def _money(minor: int, currency: str) -> str:
+    symbols = {
+        "USD": "$",
+        "EUR": "€",
+        "GBP": "£",
+        "RUB": "₽",
+    }
+    symbol = symbols.get(currency, f"{currency} ")
+    value = Decimal(minor) / Decimal(100)
+
+    return f"{symbol}{value:.2f}"
 
 @router.message(Command("promo_add"))
 async def promo_add(
@@ -153,6 +166,7 @@ async def radar_status(
                 f"{html.escape(str(source['source_key']))}"
                 "</code> — "
                 f"{html.escape(str(source['status']))}, "
+                f"{source['last_items_count']} объектов, "
                 f"{source['last_duration_ms']} мс"
             )
 
@@ -221,19 +235,104 @@ async def radar_check(
             ]
         )
 
-    response.extend(
-        [
-            "",
-            "При первом запуске бот создаёт "
-            "базовую отметку и не присылает "
-            "старые материалы.",
-        ]
-    )
-
     await status_message.edit_text(
         "\n".join(response)
     )
 
+
+@router.message(Command("lootbar_prices"))
+async def lootbar_prices(
+    message: Message,
+    settings: Settings,
+    db: Database,
+) -> None:
+    user_id = (
+        message.from_user.id
+        if message.from_user
+        else None
+    )
+
+    if not _is_admin(user_id, settings):
+        await message.answer(
+            "Команда доступна только администратору."
+        )
+        return
+
+    if not settings.lootbar_page_url:
+        await message.answer(
+            "LootBar monitor выключен."
+        )
+        return
+
+    packages = await db.list_active_lootbar_packages(
+        settings.lootbar_page_url,
+        limit=12,
+    )
+
+    if not packages:
+        await message.answer(
+            "Пакеты ещё не сохранены. "
+            "Сначала выполните /radar_check."
+        )
+        return
+
+    lines = [
+        "💳 <b>LootBar: сохранённые пакеты</b>",
+        "",
+        "Акционная цена может требовать купон.",
+        "",
+    ]
+
+    for package in packages:
+        currency = str(package["currency"])
+        promo = _money(
+            int(package["promo_price_minor"]),
+            currency,
+        )
+        regular = _money(
+            int(package["regular_price_minor"]),
+            currency,
+        )
+        official = _money(
+            int(package["official_price_minor"]),
+            currency,
+        )
+        savings = _money(
+            int(package["savings_minor"]),
+            currency,
+        )
+        badge = str(package["discount_badge"])
+        coupon = str(package["coupon_name"])
+
+        lines.append(
+            f"• <b>{html.escape(str(package['name']))}</b>\n"
+            f"  По акции: <b>{promo}</b>\n"
+            f"  Без купона: {regular}; "
+            f"официальная: {official}\n"
+            f"  Экономия: {savings}"
+        )
+
+        condition = " ".join(
+            part
+            for part in (badge, coupon)
+            if part
+        )
+
+        if condition:
+            lines.append(
+                "  Условие: "
+                f"{html.escape(condition)}"
+            )
+
+    lines.extend(
+        [
+            "",
+            "Проверьте условия на LootBar "
+            "перед публикацией.",
+        ]
+    )
+
+    await message.answer("\n".join(lines))
 
 @router.message(Command("post"))
 async def manual_post(
