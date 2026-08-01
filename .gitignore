@@ -38,3 +38,4 @@ dist/
 .coverage
 htmlcov/
 coverage/bot/data/*.db*
+bot/data/
