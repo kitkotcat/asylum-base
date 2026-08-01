@@ -1,0 +1,19 @@
+[Unit]
+Description=Asylum Base Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=asylum
+Group=asylum
+WorkingDirectory=/home/asylum/apps/asylum-base
+EnvironmentFile=/home/asylum/apps/asylum-base/.env
+ExecStart=/home/asylum/apps/asylum-base/.venv/bin/python -m bot.app.main
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
