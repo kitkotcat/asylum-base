@@ -146,3 +146,27 @@ def test_start_sends_menu_after_removing_legacy_keyboard() -> None:
         assert isinstance(message.calls[1][1], InlineKeyboardMarkup)
 
     asyncio.run(scenario())
+
+
+def test_promos_keyboard_has_navigation_without_loading_placeholder() -> None:
+    from bot.app.handlers.promo import render_promo_text
+    from bot.app.keyboards import promos_keyboard
+
+    promo = {
+        "code": "WELCOME10",
+        "reward": "100 Banknotes",
+        "region": "Global",
+        "expires_at": None,
+        "verification_status": "verified",
+        "source": "Official community",
+        "works": 3,
+        "fails": 0,
+    }
+    text = render_promo_text(promo, page=0, total=2)
+    keyboard = promos_keyboard(promo_id=7, page=0, total_pages=2)
+
+    assert "Загружаю" not in text
+    assert "WELCOME10" in text
+    assert "1 из 2" in text
+    assert keyboard.inline_keyboard[0][-1].callback_data == "promos:p:1"
+    assert keyboard.inline_keyboard[1][0].callback_data == "promo:vote:7:1"
