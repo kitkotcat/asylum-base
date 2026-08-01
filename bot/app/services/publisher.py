@@ -28,7 +28,21 @@ THREAD_BY_KIND = {
     "deal": "topup_thread_id",
     "deal_digest": "topup_thread_id",
     "topup": "topup_thread_id",
+    "guide": "guides_thread_id",
+    "hero": "heroes_thread_id",
+    "alliance": "alliance_thread_id",
 }
+
+
+def thread_id_for_kind(settings: Settings, kind: str) -> int:
+    thread_attr = THREAD_BY_KIND.get(kind)
+    if thread_attr is None:
+        raise RuntimeError(f"Неизвестный тип публикации: {kind}")
+    thread_id = getattr(settings, thread_attr)
+    if thread_id is None:
+        env_name = thread_attr.upper()
+        raise RuntimeError(f"{env_name} не заполнен в .env")
+    return thread_id
 
 
 def target_url(settings: Settings, raw_url: str, *, campaign: str) -> str:
@@ -54,8 +68,7 @@ async def publish(
 ) -> Message:
     if settings.group_chat_id is None:
         raise RuntimeError("GROUP_CHAT_ID не заполнен в .env")
-    thread_attr = THREAD_BY_KIND.get(kind, "news_thread_id")
-    thread_id = getattr(settings, thread_attr)
+    thread_id = thread_id_for_kind(settings, kind)
     return await bot.send_message(
         chat_id=settings.group_chat_id,
         message_thread_id=thread_id,
@@ -92,8 +105,7 @@ async def publish_draft(
     if settings.group_chat_id is None:
         raise RuntimeError("GROUP_CHAT_ID не заполнен в .env")
 
-    thread_attr = THREAD_BY_KIND.get(kind, "news_thread_id")
-    thread_id = getattr(settings, thread_attr)
+    thread_id = thread_id_for_kind(settings, kind)
     raw_url = str(draft.get("link") or "")
     campaign = hashlib.sha1(content_key.encode("utf-8")).hexdigest()[:12]
     url = target_url(settings, raw_url, campaign=campaign)
