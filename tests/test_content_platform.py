@@ -170,3 +170,41 @@ def test_promos_keyboard_has_navigation_without_loading_placeholder() -> None:
     assert "1 из 2" in text
     assert keyboard.inline_keyboard[0][-1].callback_data == "promos:p:1"
     assert keyboard.inline_keyboard[1][0].callback_data == "promo:vote:7:1"
+
+
+def test_content_topic_routes_are_explicit() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+
+    from bot.app.services.publisher import thread_id_for_kind
+
+    settings = SimpleNamespace(
+        news_thread_id=4,
+        promo_thread_id=6,
+        topup_thread_id=18,
+        guides_thread_id=10,
+        heroes_thread_id=8,
+        alliance_thread_id=14,
+    )
+
+    assert thread_id_for_kind(settings, "news") == 4
+    assert thread_id_for_kind(settings, "guide") == 10
+    assert thread_id_for_kind(settings, "hero") == 8
+    assert thread_id_for_kind(settings, "alliance") == 14
+
+    with pytest.raises(RuntimeError, match="Неизвестный тип"):
+        thread_id_for_kind(settings, "unknown")
+
+
+def test_content_topic_route_requires_configuration() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+
+    from bot.app.services.publisher import thread_id_for_kind
+
+    settings = SimpleNamespace(guides_thread_id=None)
+
+    with pytest.raises(RuntimeError, match="GUIDES_THREAD_ID"):
+        thread_id_for_kind(settings, "guide")

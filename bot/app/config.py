@@ -101,6 +101,9 @@ class Settings:
     news_thread_id: int | None
     promo_thread_id: int | None
     topup_thread_id: int | None
+    guides_thread_id: int | None
+    heroes_thread_id: int | None
+    alliance_thread_id: int | None
     lootbar_affiliate_url: str
     lootbar_page_url: str
     google_play_url: str
@@ -157,6 +160,9 @@ def load_settings() -> Settings:
         news_thread_id=_optional_int("NEWS_THREAD_ID"),
         promo_thread_id=_optional_int("PROMO_THREAD_ID"),
         topup_thread_id=_optional_int("TOPUP_THREAD_ID"),
+        guides_thread_id=_optional_int("GUIDES_THREAD_ID"),
+        heroes_thread_id=_optional_int("HEROES_THREAD_ID"),
+        alliance_thread_id=_optional_int("ALLIANCE_THREAD_ID"),
         lootbar_affiliate_url=_url("LOOTBAR_AFFILIATE_URL"),
         lootbar_page_url=_url("LOOTBAR_PAGE_URL"),
         google_play_url=_url("GOOGLE_PLAY_URL"),

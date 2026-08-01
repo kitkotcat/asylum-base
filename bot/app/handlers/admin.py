@@ -227,8 +227,19 @@ async def manual_post(message: Message, settings: Settings) -> None:
     kind, separator, text = payload.partition("|")
     kind = kind.strip().lower()
     text = text.strip()
-    if not separator or kind not in {"news", "promo", "topup"} or not text:
-        await message.answer("Формат: <code>/post news | Текст публикации</code>")
+    allowed_kinds = {
+        "news",
+        "promo",
+        "topup",
+        "guide",
+        "hero",
+        "alliance",
+    }
+    if not separator or kind not in allowed_kinds or not text:
+        await message.answer(
+            "Формат: <code>/post TYPE | Текст публикации</code>\n"
+            "TYPE: news, promo, topup, guide, hero, alliance"
+        )
         return
     await publish(message.bot, settings, kind, html.escape(text))
     await message.answer("✅ Пост опубликован.")
