@@ -7,6 +7,7 @@ from bot.app.db import Database
 from bot.app.services.content import (
     clean_condition,
     render_deal_caption,
+    render_deal_sales_caption,
     render_promo_caption,
 )
 from bot.app.services.content_db import (
@@ -48,6 +49,31 @@ def test_deal_caption_contains_prices_and_disclosure() -> None:
     assert "$9.99" in text
     assert "Партнёрская ссылка" in text
     assert text.count("10%") == 1
+
+
+def test_sales_caption_is_short_and_focused_on_one_package() -> None:
+    text = render_deal_sales_caption(
+        {
+            "kind": "deal_sales",
+            "title": "9999 Banknotes",
+            "metadata": {
+                "name": "9999 Banknotes",
+                "promo_price_minor": 8010,
+                "official_price_minor": 9999,
+                "savings_minor": 1989,
+                "discount_percent": 20,
+                "currency": "USD",
+            },
+        }
+    )
+
+    assert "9999 Banknotes" in text
+    assert "$80.10" in text
+    assert "$99.99" in text
+    assert "$19.89" in text
+    assert "20%" in text
+    assert "Партнёрская ссылка" in text
+    assert len(text) <= 500
 
 
 def test_publication_queue_and_duplicate_protection(tmp_path: Path) -> None:
@@ -306,6 +332,7 @@ def test_content_topic_routes_are_explicit() -> None:
     assert thread_id_for_kind(settings, "news") == 4
     assert thread_id_for_kind(settings, "guide") == 10
     assert thread_id_for_kind(settings, "hero") == 8
+    assert thread_id_for_kind(settings, "deal_sales") == 18
     assert thread_id_for_kind(settings, "alliance") == 14
 
     with pytest.raises(RuntimeError, match="Неизвестный тип"):

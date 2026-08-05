@@ -408,6 +408,117 @@ async def count_recent_auto_deals(db: Database, *, hours: int = 6) -> int:
         return int(row["total"] if row else 0)
 
 
+async def count_auto_publications_today(
+    db: Database,
+    *,
+    kind: str,
+    target_chat_id: int,
+    offset_hours: int,
+) -> int:
+    local_tz = timezone(timedelta(hours=offset_hours))
+    local_now = datetime.now(local_tz)
+    local_midnight = local_now.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    utc_start = local_midnight.astimezone(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM publication_log
+            WHERE kind = ?
+              AND target_chat_id = ?
+              AND status = 'published'
+              AND auto_published = 1
+              AND published_at >= ?
+            """,
+            (kind, target_chat_id, utc_start),
+        )
+        row = await cursor.fetchone()
+    return int(row["total"] if row else 0)
+
+
+async def latest_auto_publication_at(
+    db: Database,
+    *,
+    kind: str,
+    target_chat_id: int,
+) -> str | None:
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT published_at
+            FROM publication_log
+            WHERE kind = ?
+              AND target_chat_id = ?
+              AND status = 'published'
+              AND auto_published = 1
+            ORDER BY published_at DESC, id DESC
+            LIMIT 1
+            """,
+            (kind, target_chat_id),
+        )
+        row = await cursor.fetchone()
+    if row is None or not row["published_at"]:
+        return None
+    return str(row["published_at"])
+
+
+async def recent_offer_history(
+    db: Database,
+    *,
+    kind: str,
+    target_chat_id: int,
+    hours: int,
+) -> tuple[set[str], set[tuple[str, int, int]]]:
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=hours)
+    ).isoformat(timespec="seconds")
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT l.entity_key, COALESCE(p.metadata_json, '{}') AS metadata_json
+            FROM publication_log l
+            LEFT JOIN content_payloads p ON p.draft_id = l.draft_id
+            WHERE l.kind = ?
+              AND l.target_chat_id = ?
+              AND l.status = 'published'
+              AND l.published_at >= ?
+            ORDER BY l.published_at DESC, l.id DESC
+            """,
+            (kind, target_chat_id, cutoff),
+        )
+        rows = list(await cursor.fetchall())
+
+    package_keys: set[str] = set()
+    price_fingerprints: set[tuple[str, int, int]] = set()
+    for row in rows:
+        entity_key = str(row["entity_key"] or "").strip()
+        if entity_key:
+            package_keys.add(entity_key)
+        try:
+            metadata = json.loads(str(row["metadata_json"] or "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(metadata, dict):
+            continue
+        currency = str(metadata.get("currency") or "").strip().upper()
+        try:
+            promo = int(metadata.get("promo_price_minor") or 0)
+            official = int(metadata.get("official_price_minor") or 0)
+        except (TypeError, ValueError):
+            continue
+        if currency and promo > 0 and official > promo:
+            price_fingerprints.add((currency, promo, official))
+
+    return package_keys, price_fingerprints
+
+
 async def record_publication(
     db: Database,
     *,

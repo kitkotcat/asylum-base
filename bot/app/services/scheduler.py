@@ -23,6 +23,7 @@ from bot.app.services.community_db import (
     mark_editorial_dispatched,
 )
 from bot.app.services.content_db import (
+    count_auto_publications_today,
     count_auto_promos_today,
     count_recent_auto_deals,
     daily_stats,
@@ -33,12 +34,19 @@ from bot.app.services.content_db import (
     list_autopublish_promos,
     list_ready_queue,
     list_top_lootbar_packages,
+    latest_auto_publication_at,
     mark_job_run,
     mark_queue_status,
     publication_exists,
+    recent_offer_history,
     save_draft_payload,
 )
-from bot.app.services.lootbar import check_lootbar_packages
+from bot.app.services.deal_sales import (
+    build_offer_url,
+    current_sales_slot,
+    select_sales_offer,
+)
+from bot.app.services.lootbar import check_lootbar_packages, fetch_lootbar_packages
 from bot.app.services.parsers import (
     SourceCheckResult,
     check_google_play_update,
@@ -455,6 +463,152 @@ async def create_daily_deals_digest(settings: Settings, db: Database) -> int | N
     return draft_id
 
 
+async def create_deal_sales_draft(
+    settings: Settings,
+    db: Database,
+    *,
+    slot_key: str,
+    checked_at: datetime,
+) -> int | None:
+    if settings.group_chat_id is None or not settings.lootbar_page_url:
+        return None
+
+    try:
+        packages = await fetch_lootbar_packages()
+    except Exception:
+        logger.exception(
+            "LootBar sales offer refresh failed; no selling post was created"
+        )
+        return None
+
+    excluded_keys, excluded_prices = await recent_offer_history(
+        db,
+        kind="deal_sales",
+        target_chat_id=settings.group_chat_id,
+        hours=settings.deal_sales_repeat_hours,
+    )
+    offer = select_sales_offer(
+        packages,
+        excluded_package_keys=excluded_keys,
+        excluded_price_fingerprints=excluded_prices,
+    )
+    if offer is None:
+        logger.info("No verified non-duplicate LootBar offer is available")
+        return None
+
+    try:
+        affiliate_url = build_offer_url(settings, offer)
+    except RuntimeError:
+        logger.exception("Deal sales affiliate URL is invalid")
+        return None
+
+    price_signature = (
+        f"{offer.currency}:{offer.promo_price_minor}:"
+        f"{offer.official_price_minor}"
+    )
+    draft_id = await db.create_draft(
+        kind="deal_sales",
+        source_url=settings.lootbar_page_url,
+        item_uid=(
+            f"deal-sales:{slot_key}:{offer.package_key}:"
+            f"{hashlib.sha256(price_signature.encode()).hexdigest()[:12]}"
+        ),
+        title=offer.name,
+        link=affiliate_url,
+        summary="Проверенное актуальное предложение LootBar.",
+    )
+    if draft_id is None:
+        return None
+
+    await save_draft_payload(
+        db,
+        draft_id,
+        image_url=offer.icon_url,
+        entity_key=offer.package_key,
+        metadata={
+            "package_key": offer.package_key,
+            "name": offer.name,
+            "promo_price_minor": offer.promo_price_minor,
+            "official_price_minor": offer.official_price_minor,
+            "savings_minor": offer.savings_minor,
+            "discount_percent": offer.discount_percent,
+            "currency": offer.currency,
+            "sell_order_id": offer.sell_order_id,
+            "affiliate_url": affiliate_url,
+            "scheduled_slot": slot_key,
+            "source_checked_at": checked_at.isoformat(timespec="seconds"),
+            "auto_eligible": True,
+        },
+    )
+    return draft_id
+
+
+async def dispatch_deal_sales(
+    bot: Bot,
+    settings: Settings,
+    db: Database,
+    *,
+    now: datetime | None = None,
+) -> int:
+    if not settings.deal_sales_autopost_enabled:
+        return 0
+    if settings.group_chat_id is None:
+        logger.warning("Deal sales autopost skipped: GROUP_CHAT_ID is missing")
+        return 0
+
+    checked_at = now or datetime.now(timezone.utc)
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=timezone.utc)
+    slot_key = current_sales_slot(
+        now=checked_at,
+        timezone_offset_hours=settings.deal_sales_timezone_offset_hours,
+        hours_local=settings.deal_sales_hours_local,
+    )
+    if slot_key is None:
+        return 0
+
+    published_today = await count_auto_publications_today(
+        db,
+        kind="deal_sales",
+        target_chat_id=settings.group_chat_id,
+        offset_hours=settings.deal_sales_timezone_offset_hours,
+    )
+    if published_today >= settings.deal_sales_max_posts_per_day:
+        return 0
+
+    latest = await latest_auto_publication_at(
+        db,
+        kind="deal_sales",
+        target_chat_id=settings.group_chat_id,
+    )
+    if latest:
+        try:
+            latest_at = datetime.fromisoformat(latest)
+            if latest_at.tzinfo is None:
+                latest_at = latest_at.replace(tzinfo=timezone.utc)
+            elapsed = checked_at.astimezone(timezone.utc) - latest_at.astimezone(
+                timezone.utc
+            )
+            if elapsed < timedelta(
+                hours=settings.deal_sales_min_interval_hours
+            ):
+                return 0
+        except ValueError:
+            logger.warning("Invalid deal sales publication timestamp: %s", latest)
+
+    draft_id = await create_deal_sales_draft(
+        settings,
+        db,
+        slot_key=slot_key,
+        checked_at=checked_at,
+    )
+    if draft_id is None:
+        return 0
+    if not await enqueue_draft(db, draft_id, "deal_sales", priority=12):
+        return 0
+    return await process_publication_queue(bot, settings, db)
+
+
 async def send_daily_admin_report(bot: Bot, settings: Settings, db: Database) -> None:
     stats = await daily_stats(db)
     last_run = await db.get_last_radar_run()
@@ -711,6 +865,7 @@ async def run_scheduler(bot: Bot, settings: Settings, db: Database) -> None:
             await dispatch_active_promos(bot, settings, db)
             await dispatch_due_editorial_content(bot, settings, db)
             await run_radar_once(bot, settings, db, trigger_name="scheduler")
+            await dispatch_deal_sales(bot, settings, db)
             await run_daily_jobs(bot, settings, db)
         except RadarBusyError:
             logger.info("Content Radar scheduler skipped: check is already running")

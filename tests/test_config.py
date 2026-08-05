@@ -1,6 +1,33 @@
 from __future__ import annotations
 
-from bot.app.config import Settings
+import pytest
+
+from bot.app.config import Settings, load_settings
+
+
+def test_deal_sales_defaults_are_safe(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("BOT_TOKEN", "test-token")
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.delenv("DEAL_SALES_AUTOPOST_ENABLED", raising=False)
+    monkeypatch.delenv("DEAL_SALES_HOURS_LOCAL", raising=False)
+
+    settings = load_settings()
+
+    assert settings.deal_sales_autopost_enabled is False
+    assert settings.deal_sales_max_posts_per_day == 2
+    assert settings.deal_sales_min_interval_hours == 6
+    assert settings.deal_sales_repeat_hours == 48
+    assert settings.deal_sales_timezone_offset_hours == 5
+    assert settings.deal_sales_hours_local == (10, 19)
+
+
+def test_deal_sales_hours_are_validated(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("BOT_TOKEN", "test-token")
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("DEAL_SALES_HOURS_LOCAL", "10,25")
+
+    with pytest.raises(RuntimeError, match="диапазоне 0–23"):
+        load_settings()
 
 
 def test_auto_publish_kind_mapping(tmp_path) -> None:
@@ -24,6 +51,13 @@ def test_auto_publish_kind_mapping(tmp_path) -> None:
         auto_publish_deals=True,
         auto_publish_news=False,
         auto_publish_google_play=True,
+        deal_sales_autopost_enabled=True,
+        deal_sales_max_posts_per_day=2,
+        deal_sales_min_interval_hours=6,
+        deal_sales_repeat_hours=48,
+        deal_sales_timezone_offset_hours=5,
+        deal_sales_hours_local=(10, 19),
+        deal_sales_affiliate_url_template="",
         auto_publish_promos=True,
         promo_max_posts_per_day=2,
         promo_redeem_url="https://example.com/redeem",
@@ -48,6 +82,7 @@ def test_auto_publish_kind_mapping(tmp_path) -> None:
     )
     assert settings.auto_publish_enabled_for("deal") is True
     assert settings.auto_publish_enabled_for("deal_digest") is True
+    assert settings.auto_publish_enabled_for("deal_sales") is True
     assert settings.auto_publish_enabled_for("google_play") is True
     assert settings.auto_publish_enabled_for("news") is False
     assert settings.auto_publish_enabled_for("promo") is True
@@ -77,6 +112,13 @@ def test_hero_autopost_can_be_disabled_without_affecting_editorial(tmp_path) -> 
         auto_publish_deals=True,
         auto_publish_news=True,
         auto_publish_google_play=True,
+        deal_sales_autopost_enabled=False,
+        deal_sales_max_posts_per_day=2,
+        deal_sales_min_interval_hours=6,
+        deal_sales_repeat_hours=48,
+        deal_sales_timezone_offset_hours=5,
+        deal_sales_hours_local=(10, 19),
+        deal_sales_affiliate_url_template="",
         auto_publish_promos=True,
         promo_max_posts_per_day=2,
         promo_redeem_url="https://example.com/redeem",
@@ -101,5 +143,6 @@ def test_hero_autopost_can_be_disabled_without_affecting_editorial(tmp_path) -> 
     )
 
     assert settings.auto_publish_enabled_for("hero") is False
+    assert settings.auto_publish_enabled_for("deal_sales") is False
     assert settings.auto_publish_enabled_for("guide") is True
     assert settings.auto_publish_enabled_for("squad") is True

@@ -93,6 +93,32 @@ def _urls(name: str) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _hours(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    raw = os.getenv(name, ",".join(str(value) for value in default)).strip()
+    if not raw:
+        raise RuntimeError(f"{name} не должен быть пустым")
+
+    result: list[int] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            hour = int(value)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"{name} должен содержать часы 0–23 через запятую"
+            ) from exc
+        if hour < 0 or hour > 23:
+            raise RuntimeError(f"{name}: час {hour} должен быть в диапазоне 0–23")
+        if hour not in result:
+            result.append(hour)
+
+    if not result:
+        raise RuntimeError(f"{name} не содержит допустимых часов")
+    return tuple(sorted(result))
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     bot_token: str
@@ -114,6 +140,13 @@ class Settings:
     auto_publish_deals: bool
     auto_publish_news: bool
     auto_publish_google_play: bool
+    deal_sales_autopost_enabled: bool
+    deal_sales_max_posts_per_day: int
+    deal_sales_min_interval_hours: int
+    deal_sales_repeat_hours: int
+    deal_sales_timezone_offset_hours: int
+    deal_sales_hours_local: tuple[int, ...]
+    deal_sales_affiliate_url_template: str
     auto_publish_promos: bool
     promo_max_posts_per_day: int
     promo_redeem_url: str
@@ -141,6 +174,8 @@ class Settings:
             return False
         if kind in {"deal", "deal_digest", "topup"}:
             return self.auto_publish_deals
+        if kind == "deal_sales":
+            return self.deal_sales_autopost_enabled
         if kind == "google_play":
             return self.auto_publish_google_play
         if kind == "news":
@@ -188,6 +223,27 @@ def load_settings() -> Settings:
         auto_publish_deals=_bool("AUTO_PUBLISH_DEALS", False),
         auto_publish_news=_bool("AUTO_PUBLISH_NEWS", False),
         auto_publish_google_play=_bool("AUTO_PUBLISH_GOOGLE_PLAY", False),
+        deal_sales_autopost_enabled=_bool(
+            "DEAL_SALES_AUTOPOST_ENABLED", False
+        ),
+        deal_sales_max_posts_per_day=_int(
+            "DEAL_SALES_MAX_POSTS_PER_DAY", 2, minimum=1, maximum=10
+        ),
+        deal_sales_min_interval_hours=_int(
+            "DEAL_SALES_MIN_INTERVAL_HOURS", 6, minimum=1, maximum=24
+        ),
+        deal_sales_repeat_hours=_int(
+            "DEAL_SALES_REPEAT_HOURS", 48, minimum=1, maximum=720
+        ),
+        deal_sales_timezone_offset_hours=_int(
+            "DEAL_SALES_TIMEZONE_OFFSET_HOURS", 5, minimum=-12, maximum=14
+        ),
+        deal_sales_hours_local=_hours(
+            "DEAL_SALES_HOURS_LOCAL", (10, 19)
+        ),
+        deal_sales_affiliate_url_template=os.getenv(
+            "DEAL_SALES_AFFILIATE_URL_TEMPLATE", ""
+        ).strip(),
         auto_publish_promos=_bool("AUTO_PUBLISH_PROMOS", False),
         promo_max_posts_per_day=_int(
             "PROMO_MAX_POSTS_PER_DAY", 2, minimum=1, maximum=10
