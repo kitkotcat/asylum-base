@@ -1,0 +1,50 @@
+{
+  "version": "0.4.7",
+  "heroes": [
+    {
+      "slug": "marlena",
+      "name": "Marlena",
+      "filename": "marlena.png",
+      "sha256": "904cafe2c9fd15af7d4121f59207f22f1aa6a19420f9f1770f2881098f0efe62",
+      "width": 497,
+      "height": 406,
+      "size_bytes": 306516
+    },
+    {
+      "slug": "cynthia",
+      "name": "Cynthia",
+      "filename": "cynthia.png",
+      "sha256": "b7cb9b08552b83bcc1839424517f27c034c47ea2bdc7d57830d2ab0f9d6fad01",
+      "width": 486,
+      "height": 406,
+      "size_bytes": 290027
+    },
+    {
+      "slug": "annie",
+      "name": "Annie",
+      "filename": "annie.png",
+      "sha256": "83c90fd709ef3f886291dd2f9286521b7f45cc3c39e91fede4f472ac2c365644",
+      "width": 498,
+      "height": 406,
+      "size_bytes": 302873
+    },
+    {
+      "slug": "harper",
+      "name": "Harper",
+      "filename": "harper.png",
+      "sha256": "2c696b8dfb3cb6106395ae2c14ba3e9b0233da763becb5193a669ff52f4446df",
+      "width": 517,
+      "height": 403,
+      "size_bytes": 312671
+    },
+    {
+      "slug": "brian",
+      "name": "Brian",
+      "filename": "brian.png",
+      "sha256": "89c49c5db67709932cd6313c4c3f6546c112d25260dd26cc5ce1b8058ac71c16",
+      "width": 482,
+      "height": 403,
+      "size_bytes": 295090
+    }
+  ]
+}
