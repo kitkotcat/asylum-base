@@ -1,10 +1,10 @@
-# Asylum Base v0.3.0
+# Asylum Base v0.4.4
 
 Telegram-контентная платформа для русскоязычного сообщества **Last Asylum: Plague**.
 
 Проект собирает новости и предложения, хранит историю изменений, формирует красивые публикации и размещает их в нужных темах Telegram-группы. Автопубликация выключена по умолчанию и включается по источникам через `.env`.
 
-## Что умеет v0.3.0
+## Что умеет v0.4.4
 
 ### Auto Publishing
 
@@ -27,9 +27,27 @@ Telegram-контентная платформа для русскоязычно
 - `/promocodes` — активные промокоды;
 - `/news` — последние опубликованные новости;
 - `/guides` — навигация по гайдам;
+- `/heroes` — база героев и стратегий;
+- `/squads` — составы и связки;
+- `/events` — календарь событий;
+- `/suggest` — предложение материала на модерацию;
 - `/help` — понятная справка.
 
 Технические команды скрыты из публичного меню и показываются только администраторам.
+
+
+### Community Content Platform
+
+- база героев с ролями, сильными и слабыми сторонами;
+- база составов и синергий;
+- календарь событий с автоматическими напоминаниями;
+- управляемый банк контента и расписание повторов;
+- дневной лимит автопостов;
+- сбор публичных и анонимных Telegram-реакций;
+- рейтинг публикаций;
+- предложения материалов от участников;
+- двухэтапная модерация: предложение → черновик → публикация;
+- пауза и возобновление отдельных автопостов.
 
 ### Content Engine
 
@@ -68,6 +86,9 @@ PUBLISH_MODE=semi_auto
 AUTO_PUBLISH_DEALS=false
 AUTO_PUBLISH_NEWS=false
 AUTO_PUBLISH_GOOGLE_PLAY=false
+EDITORIAL_AUTOPOST_ENABLED=false
+EDITORIAL_MAX_POSTS_PER_DAY=1
+EDITORIAL_TIMEZONE_OFFSET_HOURS=5
 DAILY_DEALS_DIGEST_ENABLED=false
 ```
 
@@ -104,7 +125,13 @@ pytest -q
 - `lootbar_packages` — актуальные цены;
 - `lootbar_price_history` — история цен;
 - `promo_metadata` — регион, срок действия и статус промокода;
-- `scheduled_jobs` — защита ежедневных задач от повторного запуска.
+- `scheduled_jobs` — защита ежедневных задач от повторного запуска;
+- `heroes` — карточки героев;
+- `squads` — составы и связки;
+- `game_events` — календарь событий;
+- `editorial_items` — банк и расписание контента;
+- `content_suggestions` — предложения участников;
+- `message_reaction_users` и `message_reaction_totals` — аналитика реакций.
 
 ## Аналитика переходов
 
@@ -120,9 +147,11 @@ Redirect-сервис должен принять параметры `to` и `ca
 
 ## Документация релиза
 
-- [Безопасный деплой](docs/DEPLOY_V0.3.0.md)
+- [Деплой v0.4.4](docs/DEPLOY_V0.4.4.md)
+- [Безопасный деплой v0.3.0](docs/DEPLOY_V0.3.0.md)
 - [Приёмочный чек-лист](docs/ACCEPTANCE_V0.3.0.md)
 - [Rollback](docs/ROLLBACK_V0.3.0.md)
 
 - [Feature flags](docs/FEATURE_FLAGS.md)
-- [Release notes](RELEASE_NOTES_v0.3.0.md)
+- [Release notes v0.4.4](RELEASE_NOTES_v0.4.4.md)
+- [Release notes v0.3.0](RELEASE_NOTES_v0.3.0.md)

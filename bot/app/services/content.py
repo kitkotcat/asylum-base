@@ -128,4 +128,8 @@ def render_public_caption(draft: Mapping[str, Any]) -> str:
         return render_digest_caption(draft)
     if kind == "google_play":
         return render_google_play_caption(draft)
+    if kind in {"guide", "hero", "squad", "event", "alliance"}:
+        from bot.app.services.community_content import render_editorial_caption
+
+        return render_editorial_caption(draft)
     return render_news_caption(draft)

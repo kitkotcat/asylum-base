@@ -114,6 +114,9 @@ class Settings:
     auto_publish_deals: bool
     auto_publish_news: bool
     auto_publish_google_play: bool
+    editorial_autopost_enabled: bool
+    editorial_max_posts_per_day: int
+    editorial_timezone_offset_hours: int
     daily_deals_digest_enabled: bool
     daily_deals_digest_hour_utc: int
     daily_admin_report_enabled: bool
@@ -136,6 +139,8 @@ class Settings:
             return self.auto_publish_google_play
         if kind == "news":
             return self.auto_publish_news
+        if kind in {"guide", "hero", "squad", "event", "alliance"}:
+            return self.editorial_autopost_enabled
         return False
 
 
@@ -173,6 +178,13 @@ def load_settings() -> Settings:
         auto_publish_deals=_bool("AUTO_PUBLISH_DEALS", False),
         auto_publish_news=_bool("AUTO_PUBLISH_NEWS", False),
         auto_publish_google_play=_bool("AUTO_PUBLISH_GOOGLE_PLAY", False),
+        editorial_autopost_enabled=_bool("EDITORIAL_AUTOPOST_ENABLED", False),
+        editorial_max_posts_per_day=_int(
+            "EDITORIAL_MAX_POSTS_PER_DAY", 1, minimum=1, maximum=10
+        ),
+        editorial_timezone_offset_hours=_int(
+            "EDITORIAL_TIMEZONE_OFFSET_HOURS", 0, minimum=-12, maximum=14
+        ),
         daily_deals_digest_enabled=_bool("DAILY_DEALS_DIGEST_ENABLED", False),
         daily_deals_digest_hour_utc=_int("DAILY_DEALS_DIGEST_HOUR_UTC", 8, minimum=0, maximum=23),
         daily_admin_report_enabled=_bool("DAILY_ADMIN_REPORT_ENABLED", True),
