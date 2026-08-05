@@ -22,16 +22,19 @@ from bot.app.services.community_db import (
     mark_editorial_dispatched,
 )
 from bot.app.services.content_db import (
+    count_auto_promos_today,
     count_recent_auto_deals,
     daily_stats,
     enqueue_draft,
     expire_promos,
     get_draft_with_payload,
     job_due,
+    list_autopublish_promos,
     list_ready_queue,
     list_top_lootbar_packages,
     mark_job_run,
     mark_queue_status,
+    publication_exists,
     save_draft_payload,
 )
 from bot.app.services.lootbar import check_lootbar_packages
@@ -276,6 +279,134 @@ async def _latest_published_digest_signature(db: Database) -> str | None:
     return _deal_digest_signature(valid_items) if valid_items else None
 
 
+def _promo_signature(promo: dict[str, object]) -> str:
+    payload = json.dumps(
+        {
+            "code": str(promo.get("code") or "").upper(),
+            "reward": str(promo.get("reward") or ""),
+            "region": str(promo.get("region") or "Global"),
+            "expires_at": str(promo.get("expires_at") or ""),
+            "verification_status": str(
+                promo.get("verification_status") or "verified"
+            ),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def create_active_promo_drafts(
+    settings: Settings,
+    db: Database,
+    *,
+    limit: int,
+) -> tuple[int, ...]:
+    if limit <= 0:
+        return ()
+
+    draft_ids: list[int] = []
+    promos = await list_autopublish_promos(db, limit=100)
+    for row in promos:
+        promo = dict(row)
+        promo_id = int(promo["id"])
+        signature = _promo_signature(promo)
+        source_url = f"internal://promo/{promo_id}"
+        item_uid = f"promo:{promo_id}:{signature[:24]}"
+        content_key = f"{source_url}::{item_uid}"
+
+        if await publication_exists(db, content_key):
+            continue
+
+        async with db.connect() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    d.id,
+                    d.status AS draft_status,
+                    q.status AS queue_status
+                FROM content_drafts d
+                LEFT JOIN publication_queue q ON q.draft_id = d.id
+                WHERE d.source_url = ? AND d.item_uid = ?
+                LIMIT 1
+                """,
+                (source_url, item_uid),
+            )
+            existing = await cursor.fetchone()
+
+        if existing is None:
+            draft_id = await db.create_draft(
+                kind="promo",
+                source_url=source_url,
+                item_uid=item_uid,
+                title=f"Промокод {promo['code']}",
+                link=settings.promo_redeem_url,
+                summary=str(promo["reward"]),
+            )
+            if draft_id is None:
+                continue
+        else:
+            if str(existing["draft_status"]) == "published":
+                continue
+            if str(existing["queue_status"] or "") == "failed":
+                continue
+            draft_id = int(existing["id"])
+
+        await save_draft_payload(
+            db,
+            draft_id,
+            entity_key=f"promo:{promo_id}",
+            metadata={
+                "promo_id": promo_id,
+                "code": str(promo["code"]),
+                "reward": str(promo["reward"]),
+                "region": str(promo.get("region") or "Global"),
+                "expires_at": str(promo.get("expires_at") or ""),
+                "verification_status": str(
+                    promo.get("verification_status") or "verified"
+                ),
+                "source": str(promo.get("source") or ""),
+                "signature": signature,
+                "auto_eligible": True,
+            },
+        )
+        draft_ids.append(draft_id)
+        if len(draft_ids) >= limit:
+            break
+
+    return tuple(draft_ids)
+
+
+async def dispatch_active_promos(
+    bot: Bot,
+    settings: Settings,
+    db: Database,
+) -> int:
+    if not settings.auto_publish_promos:
+        return 0
+
+    published_today = await count_auto_promos_today(
+        db,
+        offset_hours=settings.editorial_timezone_offset_hours,
+    )
+    remaining = settings.promo_max_posts_per_day - published_today
+    if remaining <= 0:
+        return 0
+
+    draft_ids = await create_active_promo_drafts(
+        settings,
+        db,
+        limit=remaining,
+    )
+    for draft_id in draft_ids:
+        await enqueue_draft(db, draft_id, "promo", priority=15)
+
+    if not draft_ids:
+        return 0
+    return await process_publication_queue(bot, settings, db)
+
+
 async def create_daily_deals_digest(settings: Settings, db: Database) -> int | None:
     if not settings.lootbar_page_url or not settings.lootbar_affiliate_url:
         return None
@@ -503,6 +634,7 @@ async def run_scheduler(bot: Bot, settings: Settings, db: Database) -> None:
     while True:
         try:
             await process_publication_queue(bot, settings, db)
+            await dispatch_active_promos(bot, settings, db)
             await dispatch_due_editorial_content(bot, settings, db)
             await run_radar_once(bot, settings, db, trigger_name="scheduler")
             await run_daily_jobs(bot, settings, db)

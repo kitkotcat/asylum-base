@@ -608,6 +608,66 @@ async def list_active_promos_extended(
         return list(await cursor.fetchall())
 
 
+async def list_autopublish_promos(
+    db: Database,
+    *,
+    limit: int = 50,
+) -> list[aiosqlite.Row]:
+    """Return only explicitly verified, active promo codes.
+
+    Legacy rows without promo_metadata are intentionally excluded so an old
+    unverified code can never be published automatically.
+    """
+    now = utc_now()
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT
+                p.id,
+                p.code,
+                p.reward,
+                p.source,
+                m.region,
+                m.expires_at,
+                m.verification_status
+            FROM promo_codes p
+            JOIN promo_metadata m ON m.promo_id = p.id
+            WHERE p.is_active = 1
+              AND m.verification_status = 'verified'
+              AND (m.expires_at IS NULL OR m.expires_at = '' OR m.expires_at > ?)
+            ORDER BY p.created_at DESC, p.id DESC
+            LIMIT ?
+            """,
+            (now, limit),
+        )
+        return list(await cursor.fetchall())
+
+
+async def count_auto_promos_today(
+    db: Database,
+    *,
+    offset_hours: int = 0,
+) -> int:
+    local_tz = timezone(timedelta(hours=offset_hours))
+    local_now = datetime.now(local_tz)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = local_midnight.astimezone(timezone.utc).isoformat(timespec="seconds")
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM publication_log
+            WHERE kind = 'promo'
+              AND status = 'published'
+              AND auto_published = 1
+              AND published_at >= ?
+            """,
+            (utc_start,),
+        )
+        row = await cursor.fetchone()
+        return int(row["total"] if row else 0)
+
+
 async def expire_promos(db: Database) -> int:
     now = utc_now()
     async with db.connect() as connection:

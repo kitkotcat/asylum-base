@@ -55,11 +55,42 @@ def target_url(settings: Settings, raw_url: str, *, campaign: str) -> str:
     return f"{settings.tracked_redirect_base_url}{separator}{query}"
 
 
-def cta_keyboard(kind: str, url: str) -> InlineKeyboardMarkup:
-    text = "💳 Купить со скидкой" if kind in {"deal", "deal_digest", "topup"} else "🔗 Читать полностью"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=text, url=url)]]
-    )
+def cta_keyboard(
+    kind: str,
+    url: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    metadata = metadata or {}
+
+    if url:
+        if kind in {"deal", "deal_digest", "topup"}:
+            text = "💳 Купить со скидкой"
+        elif kind == "promo":
+            text = "🎁 Активировать код"
+        else:
+            text = "🔗 Читать полностью"
+        rows.append([InlineKeyboardButton(text=text, url=url)])
+
+    if kind == "promo" and metadata.get("promo_id"):
+        promo_id = int(metadata["promo_id"])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="✅ Работает",
+                    callback_data=f"promo:vote:{promo_id}:1",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Не работает",
+                    callback_data=f"promo:vote:{promo_id}:-1",
+                ),
+            ]
+        )
+
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def publish(
@@ -112,7 +143,12 @@ async def publish_draft(
     campaign = hashlib.sha1(content_key.encode("utf-8")).hexdigest()[:12]
     url = target_url(settings, raw_url, campaign=campaign)
     caption = render_public_caption(draft)
-    keyboard = cta_keyboard(kind, url) if url else None
+    metadata = draft.get("metadata") or {}
+    keyboard = (
+        cta_keyboard(kind, url, metadata=metadata)
+        if url or kind == "promo"
+        else None
+    )
     image_url = str(draft.get("image_url") or "")
     sent: Message | None = None
 
