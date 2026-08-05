@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,12 +12,14 @@ from bot.app.services.community_db import (
     add_game_event,
     add_suggestion,
     analytics_summary,
+    count_editorial_publications_today,
     count_recent_suggestions,
     get_hero,
     init_community_schema,
     list_due_editorial_items,
     list_pending_suggestions,
     list_upcoming_events,
+    latest_auto_editorial_publication_at,
     mark_editorial_dispatched,
     replace_reaction_totals,
     replace_user_reactions,
@@ -197,5 +200,79 @@ def test_one_time_editorial_item_archives_after_dispatch(tmp_path: Path) -> None
             db,
             now="2026-08-02T00:00:00+00:00",
         ) == []
+
+    asyncio.run(scenario())
+
+
+def test_editorial_publication_limits_are_scoped_by_kind_and_chat(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        db = Database(tmp_path / "publication-limits.db")
+        await db.init()
+        await init_content_schema(db)
+        await init_community_schema(db)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        hero_time = (now - timedelta(minutes=3)).isoformat()
+        old_hero_time = (now - timedelta(minutes=2)).isoformat()
+        guide_time = (now - timedelta(minutes=1)).isoformat()
+
+        async with db.connect() as connection:
+            await connection.executemany(
+                """
+                INSERT INTO publication_log(
+                    content_key, draft_id, kind, entity_key, title,
+                    target_chat_id, thread_id, telegram_message_id,
+                    target_url, status, auto_published, error, published_at
+                )
+                VALUES (?, NULL, ?, '', ?, ?, NULL, NULL, '', 'published', 1, NULL, ?)
+                """,
+                (
+                    (
+                        "hero:new-group",
+                        "hero",
+                        "Hero",
+                        -1002,
+                        hero_time,
+                    ),
+                    (
+                        "hero:old-group",
+                        "hero",
+                        "Old hero",
+                        -1001,
+                        old_hero_time,
+                    ),
+                    (
+                        "guide:new-group",
+                        "guide",
+                        "Guide",
+                        -1002,
+                        guide_time,
+                    ),
+                ),
+            )
+            await connection.commit()
+
+        hero_count = await count_editorial_publications_today(
+            db,
+            offset_hours=0,
+            kinds=("hero",),
+            target_chat_id=-1002,
+        )
+        nonhero_count = await count_editorial_publications_today(
+            db,
+            offset_hours=0,
+            kinds=("guide", "squad", "event", "alliance"),
+            target_chat_id=-1002,
+        )
+        latest = await latest_auto_editorial_publication_at(
+            db,
+            kind="hero",
+            target_chat_id=-1002,
+        )
+
+        assert hero_count == 1
+        assert nonhero_count == 1
+        assert latest == hero_time
 
     asyncio.run(scenario())

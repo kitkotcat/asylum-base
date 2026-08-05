@@ -163,7 +163,11 @@ async def publish_draft(
                     reply_markup=keyboard,
                 )
             except Exception:
-                logger.exception("Deal image failed; falling back to text: %s", image_url)
+                logger.exception(
+                    "Image failed for %s; falling back to text: %s",
+                    kind,
+                    image_url,
+                )
 
         if sent is None:
             sent = await bot.send_message(
