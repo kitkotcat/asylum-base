@@ -208,3 +208,136 @@ def test_content_topic_route_requires_configuration() -> None:
 
     with pytest.raises(RuntimeError, match="GUIDES_THREAD_ID"):
         thread_id_for_kind(settings, "guide")
+
+
+def test_daily_digest_only_changes_when_top_three_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from bot.app.services import scheduler
+    from bot.app.services.content_db import (
+        draft_content_key,
+        get_draft_with_payload,
+        record_publication,
+    )
+
+    class DayOne(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 5, 8, 0, tzinfo=timezone.utc)
+
+    class DayTwo(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 6, 8, 0, tzinfo=timezone.utc)
+
+    async def scenario() -> None:
+        db = Database(tmp_path / "digest.db")
+        await db.init()
+        await init_content_schema(db)
+
+        source_url = "https://example.com/last-asylum"
+        now = "2026-08-05T08:00:00+00:00"
+        rows = [
+            ("sku-1", "Pack 1", 8010, 9999, 1989),
+            ("sku-2", "Pack 2", 4010, 4999, 989),
+            ("sku-3", "Pack 3", 1610, 1999, 389),
+        ]
+        async with db.connect() as connection:
+            await connection.executemany(
+                """
+                INSERT INTO lootbar_packages(
+                    package_key,
+                    source_url,
+                    name,
+                    regular_price_minor,
+                    promo_price_minor,
+                    official_price_minor,
+                    savings_minor,
+                    currency,
+                    discount_badge,
+                    coupon_name,
+                    sell_order_id,
+                    is_active,
+                    missing_count,
+                    first_seen_at,
+                    last_seen_at,
+                    last_changed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', '', '', ?, 1, 0, ?, ?, ?)
+                """,
+                [
+                    (
+                        package_key,
+                        source_url,
+                        name,
+                        promo_price,
+                        promo_price,
+                        official_price,
+                        savings,
+                        f"order-{index}",
+                        now,
+                        now,
+                        now,
+                    )
+                    for index, (
+                        package_key,
+                        name,
+                        promo_price,
+                        official_price,
+                        savings,
+                    ) in enumerate(rows, start=1)
+                ],
+            )
+            await connection.commit()
+
+        settings = SimpleNamespace(
+            lootbar_page_url=source_url,
+            lootbar_affiliate_url="https://example.com/ref",
+        )
+
+        monkeypatch.setattr(scheduler, "datetime", DayOne)
+        first_id = await scheduler.create_daily_deals_digest(settings, db)
+        assert first_id is not None
+
+        first = await get_draft_with_payload(db, first_id)
+        assert first is not None
+        await record_publication(
+            db,
+            content_key=draft_content_key(first),
+            draft_id=first_id,
+            kind="deal_digest",
+            entity_key=str(first["entity_key"]),
+            title=str(first["title"]),
+            target_chat_id=-100,
+            thread_id=18,
+            telegram_message_id=100,
+            target_url=str(first["link"]),
+            status="published",
+            auto_published=True,
+        )
+
+        monkeypatch.setattr(scheduler, "datetime", DayTwo)
+        assert await scheduler.create_daily_deals_digest(settings, db) is None
+
+        async with db.connect() as connection:
+            await connection.execute(
+                """
+                UPDATE lootbar_packages
+                SET promo_price_minor = 7900,
+                    savings_minor = 2099
+                WHERE package_key = 'sku-1'
+                """
+            )
+            await connection.commit()
+
+        changed_id = await scheduler.create_daily_deals_digest(settings, db)
+        assert changed_id is not None
+        changed = await get_draft_with_payload(db, changed_id)
+        assert changed is not None
+        assert changed["metadata"]["signature"] != first["metadata"]["signature"]
+
+    asyncio.run(scenario())
