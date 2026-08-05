@@ -13,6 +13,14 @@ def main_menu(*, community_url: str = "") -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📰 Новости", callback_data="menu:news"),
             InlineKeyboardButton(text="📘 Гайды", callback_data="menu:guides"),
         ],
+        [
+            InlineKeyboardButton(text="⚔️ Герои", callback_data="menu:heroes"),
+            InlineKeyboardButton(text="🧩 Составы", callback_data="menu:squads"),
+        ],
+        [
+            InlineKeyboardButton(text="📅 События", callback_data="menu:events"),
+            InlineKeyboardButton(text="💡 Предложить", callback_data="menu:suggest"),
+        ],
     ]
     if community_url:
         rows.append([InlineKeyboardButton(text="💬 Наше сообщество", url=community_url)])
@@ -131,5 +139,22 @@ def admin_panel() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📊 Отчёт", callback_data="admin:report"),
                 InlineKeyboardButton(text="⚙️ Статус", callback_data="admin:status"),
             ],
+        ]
+    )
+
+
+def suggestion_keyboard(suggestion_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ В черновики",
+                    callback_data=f"suggest:approve:{suggestion_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"suggest:reject:{suggestion_id}",
+                ),
+            ]
         ]
     )

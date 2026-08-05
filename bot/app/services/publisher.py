@@ -30,6 +30,8 @@ THREAD_BY_KIND = {
     "topup": "topup_thread_id",
     "guide": "guides_thread_id",
     "hero": "heroes_thread_id",
+    "squad": "heroes_thread_id",
+    "event": "news_thread_id",
     "alliance": "alliance_thread_id",
 }
 
@@ -115,7 +117,7 @@ async def publish_draft(
     sent: Message | None = None
 
     try:
-        if image_url and kind == "deal":
+        if image_url and kind in {"deal", "guide", "hero", "squad", "event", "alliance"}:
             try:
                 sent = await bot.send_photo(
                     chat_id=settings.group_chat_id,

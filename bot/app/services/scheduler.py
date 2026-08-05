@@ -16,6 +16,11 @@ from bot.app.config import Settings
 from bot.app.db import Database
 from bot.app.keyboards import draft_keyboard
 from bot.app.services.content import money
+from bot.app.services.community_db import (
+    count_editorial_publications_today,
+    list_due_editorial_items,
+    mark_editorial_dispatched,
+)
 from bot.app.services.content_db import (
     count_recent_auto_deals,
     daily_stats,
@@ -342,6 +347,62 @@ async def send_daily_admin_report(bot: Bot, settings: Settings, db: Database) ->
     await _notify_admin_text(bot, settings, "\n".join(lines))
 
 
+
+
+async def dispatch_due_editorial_content(
+    bot: Bot,
+    settings: Settings,
+    db: Database,
+) -> int:
+    if not settings.editorial_autopost_enabled:
+        return 0
+
+    published_today = await count_editorial_publications_today(
+        db,
+        offset_hours=settings.editorial_timezone_offset_hours,
+    )
+    remaining = settings.editorial_max_posts_per_day - published_today
+    if remaining <= 0:
+        return 0
+
+    queued = 0
+    for item in await list_due_editorial_items(db, limit=remaining):
+        editorial_id = int(item["id"])
+        kind = str(item["kind"])
+        scheduled_at = str(item["next_publish_at"])
+        external_url = str(item["source_url"] or "")
+        draft_id = await db.create_draft(
+            kind=kind,
+            source_url=f"internal://editorial/{editorial_id}",
+            item_uid=f"editorial:{editorial_id}:{scheduled_at}",
+            title=str(item["title"]),
+            link=external_url if external_url.startswith(("http://", "https://")) else "",
+            summary=str(item["body"]),
+        )
+        if draft_id is None:
+            await mark_editorial_dispatched(db, editorial_id)
+            continue
+
+        await save_draft_payload(
+            db,
+            draft_id,
+            image_url=str(item["image_file_id"] or ""),
+            entity_key=str(item["entity_key"] or f"editorial:{editorial_id}"),
+            metadata={
+                "editorial_id": editorial_id,
+                "auto_eligible": True,
+                "scheduled_at": scheduled_at,
+            },
+        )
+        if await enqueue_draft(db, draft_id, kind, priority=60):
+            queued += 1
+        await mark_editorial_dispatched(db, editorial_id)
+
+    if not queued:
+        return 0
+    return await process_publication_queue(bot, settings, db)
+
+
 async def run_daily_jobs(bot: Bot, settings: Settings, db: Database) -> None:
     await expire_promos(db)
 
@@ -442,6 +503,7 @@ async def run_scheduler(bot: Bot, settings: Settings, db: Database) -> None:
     while True:
         try:
             await process_publication_queue(bot, settings, db)
+            await dispatch_due_editorial_content(bot, settings, db)
             await run_radar_once(bot, settings, db, trigger_name="scheduler")
             await run_daily_jobs(bot, settings, db)
         except RadarBusyError:

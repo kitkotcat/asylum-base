@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import uuid
 from datetime import datetime, timezone
 
 from aiogram import F, Router
@@ -15,10 +16,11 @@ from bot.app.services.content_db import (
     deactivate_promo_by_code,
     get_draft_with_payload,
     list_pending_drafts,
+    record_publication,
     set_promo_metadata,
 )
 from bot.app.services.parsers import render_draft
-from bot.app.services.publisher import publish, publish_draft
+from bot.app.services.publisher import publish, publish_draft, thread_id_for_kind
 from bot.app.services.scheduler import (
     RadarBusyError,
     run_radar_once,
@@ -60,7 +62,8 @@ async def admin_command(message: Message, settings: Settings) -> None:
         f"Режим публикации: <code>{settings.publish_mode}</code>\n"
         f"Автоскидки: <b>{'ON' if settings.auto_publish_deals else 'OFF'}</b>\n"
         f"Автоновости: <b>{'ON' if settings.auto_publish_news else 'OFF'}</b>\n"
-        f"Google Play: <b>{'ON' if settings.auto_publish_google_play else 'OFF'}</b>",
+        f"Google Play: <b>{'ON' if settings.auto_publish_google_play else 'OFF'}</b>\n"
+        f"Контент: <b>{'ON' if settings.editorial_autopost_enabled else 'OFF'}</b>",
         reply_markup=admin_panel(),
     )
 
@@ -219,7 +222,7 @@ async def report(message: Message, settings: Settings, db: Database) -> None:
 
 
 @router.message(Command("post"))
-async def manual_post(message: Message, settings: Settings) -> None:
+async def manual_post(message: Message, settings: Settings, db: Database) -> None:
     if not _is_admin(_admin_id(message), settings):
         await _deny(message)
         return
@@ -233,16 +236,33 @@ async def manual_post(message: Message, settings: Settings) -> None:
         "topup",
         "guide",
         "hero",
+        "squad",
+        "event",
         "alliance",
     }
     if not separator or kind not in allowed_kinds or not text:
         await message.answer(
             "Формат: <code>/post TYPE | Текст публикации</code>\n"
-            "TYPE: news, promo, topup, guide, hero, alliance"
+            "TYPE: news, promo, topup, guide, hero, squad, event, alliance"
         )
         return
-    await publish(message.bot, settings, kind, html.escape(text))
-    await message.answer("✅ Пост опубликован.")
+    sent = await publish(message.bot, settings, kind, html.escape(text))
+    content_key = f"manual:{kind}:{uuid.uuid4().hex}"
+    await record_publication(
+        db,
+        content_key=content_key,
+        draft_id=None,
+        kind=kind,
+        entity_key=content_key,
+        title=text.splitlines()[0][:200],
+        target_chat_id=settings.group_chat_id,
+        thread_id=thread_id_for_kind(settings, kind),
+        telegram_message_id=sent.message_id,
+        target_url="",
+        status="published",
+        auto_published=False,
+    )
+    await message.answer("✅ Пост опубликован и записан в аналитику.")
 
 
 async def _show_pending(message: Message, db: Database) -> None:
