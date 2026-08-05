@@ -26,6 +26,7 @@ THREAD_BY_KIND = {
     "google_play": "news_thread_id",
     "promo": "promo_thread_id",
     "deal": "topup_thread_id",
+    "deal_sales": "topup_thread_id",
     "deal_digest": "topup_thread_id",
     "topup": "topup_thread_id",
     "guide": "guides_thread_id",
@@ -65,7 +66,9 @@ def cta_keyboard(
     metadata = metadata or {}
 
     if url:
-        if kind in {"deal", "deal_digest", "topup"}:
+        if kind == "deal_sales":
+            text = "🔥 Купить со скидкой"
+        elif kind in {"deal", "deal_digest", "topup"}:
             text = "💳 Купить со скидкой"
         elif kind == "promo":
             text = "🎁 Активировать код"
@@ -129,11 +132,19 @@ async def publish_draft(
 
     kind = str(draft["kind"])
     entity_key = str(draft.get("entity_key") or "")
-    if auto_published and kind == "deal" and await entity_published_recently(
-        db, entity_key, hours=settings.deal_cooldown_hours
-    ):
-        await db.set_draft_status(draft_id, "cooldown")
-        return None
+    if auto_published:
+        cooldown_hours = None
+        if kind == "deal":
+            cooldown_hours = settings.deal_cooldown_hours
+        elif kind == "deal_sales":
+            cooldown_hours = settings.deal_sales_repeat_hours
+        if cooldown_hours is not None and await entity_published_recently(
+            db,
+            entity_key,
+            hours=cooldown_hours,
+        ):
+            await db.set_draft_status(draft_id, "cooldown")
+            return None
 
     if settings.group_chat_id is None:
         raise RuntimeError("GROUP_CHAT_ID не заполнен в .env")
@@ -153,7 +164,15 @@ async def publish_draft(
     sent: Message | None = None
 
     try:
-        if image_url and kind in {"deal", "guide", "hero", "squad", "event", "alliance"}:
+        if image_url and kind in {
+            "deal",
+            "deal_sales",
+            "guide",
+            "hero",
+            "squad",
+            "event",
+            "alliance",
+        }:
             try:
                 sent = await bot.send_photo(
                     chat_id=settings.group_chat_id,

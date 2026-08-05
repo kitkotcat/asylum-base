@@ -96,6 +96,37 @@ def render_digest_caption(draft: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_deal_sales_caption(draft: Mapping[str, Any]) -> str:
+    metadata = draft.get("metadata") or {}
+    name = html.escape(
+        str(metadata.get("name") or draft.get("title") or "Предложение")
+    )
+    currency = str(metadata.get("currency") or "USD")
+    promo = money(metadata.get("promo_price_minor"), currency)
+    official = money(metadata.get("official_price_minor"), currency)
+    savings = money(metadata.get("savings_minor"), currency)
+    discount = int(metadata.get("discount_percent") or 0)
+
+    return "\n".join(
+        [
+            "🔥 <b>Скидка на пополнение Last Asylum</b>",
+            "",
+            f"🎁 <b>{name}</b>",
+            "",
+            f"💳 Сейчас: <b>{promo}</b>",
+            f"<s>Обычная цена: {official}</s>",
+            "",
+            f"💰 Экономия: <b>{savings}</b>",
+            f"⚡ Скидка: <b>{discount}%</b>",
+            "",
+            "Подойдёт тем, кто планировал пополнение и хочет взять пакет дешевле.",
+            "",
+            "<i>Проверь итоговую цену и условия перед оплатой. "
+            "Партнёрская ссылка.</i>",
+        ]
+    )
+
+
 def render_promo_caption(draft: Mapping[str, Any]) -> str:
     metadata = draft.get("metadata") or {}
     code = html.escape(str(metadata.get("code") or draft.get("title") or ""))
@@ -148,6 +179,8 @@ def render_google_play_caption(draft: Mapping[str, Any]) -> str:
 
 def render_public_caption(draft: Mapping[str, Any]) -> str:
     kind = str(draft.get("kind") or "news")
+    if kind == "deal_sales":
+        return render_deal_sales_caption(draft)
     if kind in {"deal", "topup"}:
         return render_deal_caption(draft)
     if kind == "deal_digest":
