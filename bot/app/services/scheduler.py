@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -214,6 +215,62 @@ async def process_publication_queue(
     return published
 
 
+def _deal_digest_signature(items: list[dict[str, object]]) -> str:
+    normalized = [
+        {
+            "package_key": str(item.get("package_key") or ""),
+            "name": str(item.get("name") or ""),
+            "promo_price_minor": int(item.get("promo_price_minor") or 0),
+            "official_price_minor": int(item.get("official_price_minor") or 0),
+            "savings_minor": int(item.get("savings_minor") or 0),
+            "currency": str(item.get("currency") or ""),
+        }
+        for item in items
+    ]
+    payload = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _latest_published_digest_signature(db: Database) -> str | None:
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT p.metadata_json
+            FROM publication_log l
+            JOIN content_payloads p ON p.draft_id = l.draft_id
+            WHERE l.kind = 'deal_digest'
+              AND l.status = 'published'
+            ORDER BY l.published_at DESC, l.id DESC
+            LIMIT 1
+            """
+        )
+        row = await cursor.fetchone()
+
+    if row is None:
+        return None
+
+    try:
+        metadata = json.loads(str(row["metadata_json"] or "{}"))
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    stored_signature = metadata.get("signature")
+    if isinstance(stored_signature, str) and stored_signature:
+        return stored_signature
+
+    stored_items = metadata.get("items")
+    if not isinstance(stored_items, list):
+        return None
+
+    valid_items = [item for item in stored_items if isinstance(item, dict)]
+    return _deal_digest_signature(valid_items) if valid_items else None
+
+
 async def create_daily_deals_digest(settings: Settings, db: Database) -> int | None:
     if not settings.lootbar_page_url or not settings.lootbar_affiliate_url:
         return None
@@ -233,10 +290,15 @@ async def create_daily_deals_digest(settings: Settings, db: Database) -> int | N
         }
         for row in packages
     ]
+    signature = _deal_digest_signature(items)
+    if await _latest_published_digest_signature(db) == signature:
+        logger.info("Daily deals digest is unchanged; publication skipped")
+        return None
+
     draft_id = await db.create_draft(
         kind="deal_digest",
         source_url=settings.lootbar_page_url,
-        item_uid=f"daily-deals:{today}",
+        item_uid=f"daily-deals:{today}:{signature[:16]}",
         title=f"Лучшие предложения дня — {today}",
         link=settings.lootbar_affiliate_url,
         summary="Ежедневная подборка трёх лучших предложений LootBar.",
@@ -246,8 +308,12 @@ async def create_daily_deals_digest(settings: Settings, db: Database) -> int | N
     await save_draft_payload(
         db,
         draft_id,
-        entity_key=f"daily-deals:{today}",
-        metadata={"items": items, "auto_eligible": True},
+        entity_key=f"daily-deals:{signature}",
+        metadata={
+            "items": items,
+            "signature": signature,
+            "auto_eligible": True,
+        },
     )
     return draft_id
 
