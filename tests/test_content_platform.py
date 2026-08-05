@@ -4,12 +4,17 @@ import asyncio
 from pathlib import Path
 
 from bot.app.db import Database
-from bot.app.services.content import clean_condition, render_deal_caption
+from bot.app.services.content import (
+    clean_condition,
+    render_deal_caption,
+    render_promo_caption,
+)
 from bot.app.services.content_db import (
     draft_content_key,
     enqueue_draft,
     get_draft_with_payload,
     init_content_schema,
+    list_autopublish_promos,
     list_ready_queue,
     publication_exists,
     record_publication,
@@ -98,6 +103,116 @@ def test_publication_queue_and_duplicate_protection(tmp_path: Path) -> None:
 
     asyncio.run(scenario())
 
+
+
+def test_promo_caption_and_keyboard_include_redeem_and_votes() -> None:
+    from bot.app.services.publisher import cta_keyboard
+
+    draft = {
+        "kind": "promo",
+        "title": "Промокод TEST26",
+        "summary": "100 алмазов",
+        "metadata": {
+            "promo_id": 17,
+            "code": "TEST26",
+            "reward": "100 алмазов",
+            "region": "Global",
+            "expires_at": "",
+            "source": "Official Discord",
+        },
+    }
+    text = render_promo_caption(draft)
+    keyboard = cta_keyboard(
+        "promo",
+        "https://example.com/redeem",
+        metadata=draft["metadata"],
+    )
+
+    assert "TEST26" in text
+    assert "100 алмазов" in text
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].url == "https://example.com/redeem"
+    assert keyboard.inline_keyboard[1][0].callback_data == "promo:vote:17:1"
+    assert keyboard.inline_keyboard[1][1].callback_data == "promo:vote:17:-1"
+
+
+def test_only_explicitly_verified_promos_are_autopublished(tmp_path: Path) -> None:
+    from bot.app.services.content_db import set_promo_metadata
+
+    async def scenario() -> None:
+        db = Database(tmp_path / "promos.db")
+        await db.init()
+        await init_content_schema(db)
+
+        verified_id = await db.add_promo(
+            "WORKS26",
+            "100 алмазов",
+            "Official Discord",
+        )
+        await set_promo_metadata(
+            db,
+            verified_id,
+            verification_status="verified",
+        )
+
+        likely_id = await db.add_promo(
+            "MAYBE26",
+            "Неизвестно",
+            "Community",
+        )
+        await set_promo_metadata(
+            db,
+            likely_id,
+            verification_status="likely",
+        )
+
+        await db.add_promo(
+            "LEGACY26",
+            "Неизвестно",
+            "Legacy source",
+        )
+
+        rows = await list_autopublish_promos(db)
+        assert [row["code"] for row in rows] == ["WORKS26"]
+
+    asyncio.run(scenario())
+
+
+def test_active_promo_drafts_are_content_deduplicated(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from bot.app.services.content_db import set_promo_metadata
+    from bot.app.services.scheduler import create_active_promo_drafts
+
+    async def scenario() -> None:
+        db = Database(tmp_path / "promo-drafts.db")
+        await db.init()
+        await init_content_schema(db)
+        promo_id = await db.add_promo(
+            "UNIQUE26",
+            "200 алмазов",
+            "Official Discord",
+        )
+        await set_promo_metadata(
+            db,
+            promo_id,
+            verification_status="verified",
+        )
+        settings = SimpleNamespace(
+            promo_redeem_url="https://example.com/redeem",
+        )
+
+        first = await create_active_promo_drafts(settings, db, limit=2)
+        second = await create_active_promo_drafts(settings, db, limit=2)
+
+        assert len(first) == 1
+        assert second == first
+        draft = await get_draft_with_payload(db, first[0])
+        assert draft is not None
+        assert draft["metadata"]["promo_id"] == promo_id
+        assert draft["metadata"]["code"] == "UNIQUE26"
+
+    asyncio.run(scenario())
 
 def test_start_sends_menu_after_removing_legacy_keyboard() -> None:
     from types import SimpleNamespace

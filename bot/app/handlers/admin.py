@@ -63,6 +63,8 @@ async def admin_command(message: Message, settings: Settings) -> None:
         f"Автоскидки: <b>{'ON' if settings.auto_publish_deals else 'OFF'}</b>\n"
         f"Автоновости: <b>{'ON' if settings.auto_publish_news else 'OFF'}</b>\n"
         f"Google Play: <b>{'ON' if settings.auto_publish_google_play else 'OFF'}</b>\n"
+        f"Промокоды: <b>{'ON' if settings.auto_publish_promos else 'OFF'}</b> "
+        f"(до {settings.promo_max_posts_per_day}/день)\n"
         f"Контент: <b>{'ON' if settings.editorial_autopost_enabled else 'OFF'}</b>",
         reply_markup=admin_panel(),
     )
@@ -110,7 +112,14 @@ async def promo_add(message: Message, settings: Settings, db: Database) -> None:
         expires_at=expires_at,
         verification_status="verified",
     )
-    await message.answer(f"✅ Промокод сохранён. ID: <code>{promo_id}</code>")
+    suffix = (
+        " Автопубликация — в течение следующего цикла."
+        if settings.auto_publish_promos
+        else " Автопубликация выключена."
+    )
+    await message.answer(
+        f"✅ Промокод сохранён. ID: <code>{promo_id}</code>.{suffix}"
+    )
 
 
 @router.message(Command("promo_expire"))

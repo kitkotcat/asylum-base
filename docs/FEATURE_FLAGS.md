@@ -7,6 +7,8 @@ PUBLISH_MODE=semi_auto
 AUTO_PUBLISH_DEALS=false
 AUTO_PUBLISH_NEWS=false
 AUTO_PUBLISH_GOOGLE_PLAY=false
+AUTO_PUBLISH_PROMOS=false
+PROMO_MAX_POSTS_PER_DAY=2
 DAILY_DEALS_DIGEST_ENABLED=false
 DAILY_ADMIN_REPORT_ENABLED=true
 ```
@@ -40,3 +42,16 @@ DEAL_COOLDOWN_HOURS=24
 ```
 
 Когда лимит исчерпан, материал не теряется: он остаётся черновиком для ручной проверки.
+
+## Промокоды v0.4.5
+
+```dotenv
+AUTO_PUBLISH_PROMOS=true
+PROMO_MAX_POSTS_PER_DAY=2
+PROMO_REDEEM_URL=https://gevents.globallap.com/gamecode/index.html?gameId=440
+```
+
+Автоматически публикуются только активные коды с явным статусом `verified`
+в таблице `promo_metadata`. Старые записи без метаданных, кандидаты и коды со
+статусом `likely` автоматически не публикуются. Изменение награды, региона или
+срока создаёт новую версию публикации; неизменный код повторно не отправляется.

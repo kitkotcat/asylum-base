@@ -24,6 +24,9 @@ def test_auto_publish_kind_mapping(tmp_path) -> None:
         auto_publish_deals=True,
         auto_publish_news=False,
         auto_publish_google_play=True,
+        auto_publish_promos=True,
+        promo_max_posts_per_day=2,
+        promo_redeem_url="https://example.com/redeem",
         editorial_autopost_enabled=True,
         editorial_max_posts_per_day=1,
         editorial_timezone_offset_hours=5,
@@ -44,6 +47,7 @@ def test_auto_publish_kind_mapping(tmp_path) -> None:
     assert settings.auto_publish_enabled_for("deal_digest") is True
     assert settings.auto_publish_enabled_for("google_play") is True
     assert settings.auto_publish_enabled_for("news") is False
+    assert settings.auto_publish_enabled_for("promo") is True
     assert settings.auto_publish_enabled_for("hero") is True
     assert settings.auto_publish_enabled_for("squad") is True
     assert settings.auto_publish_enabled_for("event") is True

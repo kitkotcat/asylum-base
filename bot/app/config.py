@@ -114,6 +114,9 @@ class Settings:
     auto_publish_deals: bool
     auto_publish_news: bool
     auto_publish_google_play: bool
+    auto_publish_promos: bool
+    promo_max_posts_per_day: int
+    promo_redeem_url: str
     editorial_autopost_enabled: bool
     editorial_max_posts_per_day: int
     editorial_timezone_offset_hours: int
@@ -139,6 +142,8 @@ class Settings:
             return self.auto_publish_google_play
         if kind == "news":
             return self.auto_publish_news
+        if kind == "promo":
+            return self.auto_publish_promos
         if kind in {"guide", "hero", "squad", "event", "alliance"}:
             return self.editorial_autopost_enabled
         return False
@@ -178,6 +183,11 @@ def load_settings() -> Settings:
         auto_publish_deals=_bool("AUTO_PUBLISH_DEALS", False),
         auto_publish_news=_bool("AUTO_PUBLISH_NEWS", False),
         auto_publish_google_play=_bool("AUTO_PUBLISH_GOOGLE_PLAY", False),
+        auto_publish_promos=_bool("AUTO_PUBLISH_PROMOS", False),
+        promo_max_posts_per_day=_int(
+            "PROMO_MAX_POSTS_PER_DAY", 2, minimum=1, maximum=10
+        ),
+        promo_redeem_url=_url("PROMO_REDEEM_URL"),
         editorial_autopost_enabled=_bool("EDITORIAL_AUTOPOST_ENABLED", False),
         editorial_max_posts_per_day=_int(
             "EDITORIAL_MAX_POSTS_PER_DAY", 1, minimum=1, maximum=10

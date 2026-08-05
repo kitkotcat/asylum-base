@@ -96,6 +96,32 @@ def render_digest_caption(draft: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_promo_caption(draft: Mapping[str, Any]) -> str:
+    metadata = draft.get("metadata") or {}
+    code = html.escape(str(metadata.get("code") or draft.get("title") or ""))
+    reward = html.escape(str(metadata.get("reward") or draft.get("summary") or "Не указана"))
+    region = html.escape(str(metadata.get("region") or "Global"))
+    expires_at = html.escape(str(metadata.get("expires_at") or "не объявлен"))
+    source = html.escape(str(metadata.get("source") or "проверенный источник"))
+    return "\n".join(
+        [
+            "🎁 <b>Активный промокод Last Asylum</b>",
+            "",
+            f"Код: <code>{code}</code>",
+            f"Награда: {reward}",
+            f"Регион: {region}",
+            f"Срок действия: {expires_at}",
+            f"Источник проверки: {source}",
+            "",
+            "Android: Профиль → Настройки → Gift Code.",
+            "iOS и Android: используйте кнопку активации ниже.",
+            "",
+            "<i>Коды могут перестать работать без предупреждения. "
+            "Отметьте результат кнопками под сообщением.</i>",
+        ]
+    )
+
+
 def render_news_caption(draft: Mapping[str, Any]) -> str:
     title = html.escape(str(draft.get("title") or "Новость Last Asylum"))
     summary = html.escape(trim_text(str(draft.get("summary") or ""), 850))
@@ -128,6 +154,8 @@ def render_public_caption(draft: Mapping[str, Any]) -> str:
         return render_digest_caption(draft)
     if kind == "google_play":
         return render_google_play_caption(draft)
+    if kind == "promo":
+        return render_promo_caption(draft)
     if kind in {"guide", "hero", "squad", "event", "alliance"}:
         from bot.app.services.community_content import render_editorial_caption
 

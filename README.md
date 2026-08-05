@@ -1,10 +1,10 @@
-# Asylum Base v0.4.4
+# Asylum Base v0.4.5
 
 Telegram-контентная платформа для русскоязычного сообщества **Last Asylum: Plague**.
 
 Проект собирает новости и предложения, хранит историю изменений, формирует красивые публикации и размещает их в нужных темах Telegram-группы. Автопубликация выключена по умолчанию и включается по источникам через `.env`.
 
-## Что умеет v0.4.4
+## Что умеет v0.4.5
 
 ### Auto Publishing
 
@@ -16,6 +16,9 @@ Telegram-контентная платформа для русскоязычно
 - лимит автоматических скидочных постов;
 - очередь и журнал публикаций;
 - ежедневный Top-3 дайджест;
+- автопубликация только явно подтверждённых промокодов;
+- дневной лимит промокодов и защита от повторов;
+- кнопка активации и голосование «работает / не работает»;
 - режимы `manual`, `semi_auto`, `auto`.
 
 ### Пользовательский интерфейс
@@ -86,6 +89,8 @@ PUBLISH_MODE=semi_auto
 AUTO_PUBLISH_DEALS=false
 AUTO_PUBLISH_NEWS=false
 AUTO_PUBLISH_GOOGLE_PLAY=false
+AUTO_PUBLISH_PROMOS=false
+PROMO_MAX_POSTS_PER_DAY=2
 EDITORIAL_AUTOPOST_ENABLED=false
 EDITORIAL_MAX_POSTS_PER_DAY=1
 EDITORIAL_TIMEZONE_OFFSET_HOURS=5
