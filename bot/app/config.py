@@ -119,6 +119,9 @@ class Settings:
     promo_redeem_url: str
     editorial_autopost_enabled: bool
     editorial_max_posts_per_day: int
+    hero_autopost_enabled: bool
+    hero_max_posts_per_day: int
+    hero_min_interval_hours: int
     editorial_timezone_offset_hours: int
     daily_deals_digest_enabled: bool
     daily_deals_digest_hour_utc: int
@@ -144,7 +147,9 @@ class Settings:
             return self.auto_publish_news
         if kind == "promo":
             return self.auto_publish_promos
-        if kind in {"guide", "hero", "squad", "event", "alliance"}:
+        if kind == "hero":
+            return self.editorial_autopost_enabled and self.hero_autopost_enabled
+        if kind in {"guide", "squad", "event", "alliance"}:
             return self.editorial_autopost_enabled
         return False
 
@@ -191,6 +196,13 @@ def load_settings() -> Settings:
         editorial_autopost_enabled=_bool("EDITORIAL_AUTOPOST_ENABLED", False),
         editorial_max_posts_per_day=_int(
             "EDITORIAL_MAX_POSTS_PER_DAY", 1, minimum=1, maximum=10
+        ),
+        hero_autopost_enabled=_bool("HERO_AUTOPOST_ENABLED", False),
+        hero_max_posts_per_day=_int(
+            "HERO_MAX_POSTS_PER_DAY", 2, minimum=1, maximum=10
+        ),
+        hero_min_interval_hours=_int(
+            "HERO_MIN_INTERVAL_HOURS", 6, minimum=1, maximum=24
         ),
         editorial_timezone_offset_hours=_int(
             "EDITORIAL_TIMEZONE_OFFSET_HOURS", 0, minimum=-12, maximum=14

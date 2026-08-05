@@ -6,7 +6,7 @@ import html
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Awaitable, Callable
 
@@ -18,6 +18,7 @@ from bot.app.keyboards import draft_keyboard
 from bot.app.services.content import money
 from bot.app.services.community_db import (
     count_editorial_publications_today,
+    latest_auto_editorial_publication_at,
     list_due_editorial_items,
     mark_editorial_dispatched,
 )
@@ -488,18 +489,81 @@ async def dispatch_due_editorial_content(
     if not settings.editorial_autopost_enabled:
         return 0
 
-    published_today = await count_editorial_publications_today(
+    nonhero_kinds = ("guide", "squad", "event", "alliance")
+    published_nonhero_today = await count_editorial_publications_today(
         db,
         offset_hours=settings.editorial_timezone_offset_hours,
+        kinds=nonhero_kinds,
+        target_chat_id=settings.group_chat_id,
     )
-    remaining = settings.editorial_max_posts_per_day - published_today
-    if remaining <= 0:
+    remaining_nonhero = max(
+        0,
+        settings.editorial_max_posts_per_day - published_nonhero_today,
+    )
+
+    remaining_hero = 0
+    hero_interval_ready = False
+    if settings.hero_autopost_enabled:
+        published_hero_today = await count_editorial_publications_today(
+            db,
+            offset_hours=settings.editorial_timezone_offset_hours,
+            kinds=("hero",),
+            target_chat_id=settings.group_chat_id,
+        )
+        remaining_hero = max(
+            0,
+            settings.hero_max_posts_per_day - published_hero_today,
+        )
+        hero_interval_ready = remaining_hero > 0
+
+        if hero_interval_ready:
+            last_hero_at = await latest_auto_editorial_publication_at(
+                db,
+                kind="hero",
+                target_chat_id=settings.group_chat_id,
+            )
+            if last_hero_at:
+                try:
+                    last_hero = datetime.fromisoformat(last_hero_at)
+                    if last_hero.tzinfo is None:
+                        last_hero = last_hero.replace(tzinfo=timezone.utc)
+                    elapsed = datetime.now(timezone.utc) - last_hero.astimezone(
+                        timezone.utc
+                    )
+                    hero_interval_ready = elapsed >= timedelta(
+                        hours=settings.hero_min_interval_hours
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Некорректная дата последней публикации героя: %s",
+                        last_hero_at,
+                    )
+
+    if remaining_nonhero <= 0 and (
+        remaining_hero <= 0 or not hero_interval_ready
+    ):
         return 0
 
     queued = 0
-    for item in await list_due_editorial_items(db, limit=remaining):
+    due_limit = max(20, (remaining_nonhero + remaining_hero) * 5)
+    for item in await list_due_editorial_items(db, limit=due_limit):
         editorial_id = int(item["id"])
         kind = str(item["kind"])
+
+        if kind == "hero":
+            if remaining_hero <= 0 or not hero_interval_ready:
+                continue
+        elif kind in nonhero_kinds:
+            if remaining_nonhero <= 0:
+                continue
+        else:
+            logger.warning(
+                "Пропущен неизвестный редакционный тип %s для item %s",
+                kind,
+                editorial_id,
+            )
+            continue
+
         scheduled_at = str(item["next_publish_at"])
         external_url = str(item["source_url"] or "")
         draft_id = await db.create_draft(
@@ -527,7 +591,17 @@ async def dispatch_due_editorial_content(
         )
         if await enqueue_draft(db, draft_id, kind, priority=60):
             queued += 1
+            if kind == "hero":
+                remaining_hero -= 1
+                hero_interval_ready = False
+            else:
+                remaining_nonhero -= 1
         await mark_editorial_dispatched(db, editorial_id)
+
+        if remaining_nonhero <= 0 and (
+            remaining_hero <= 0 or not hero_interval_ready
+        ):
+            break
 
     if not queued:
         return 0

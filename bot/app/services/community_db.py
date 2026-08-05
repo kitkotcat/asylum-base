@@ -661,25 +661,75 @@ async def count_editorial_publications_today(
     db: Database,
     *,
     offset_hours: int = 0,
+    kinds: Iterable[str] = EDITORIAL_KINDS,
+    target_chat_id: int | None = None,
 ) -> int:
+    selected_kinds = tuple(
+        dict.fromkeys(kind for kind in kinds if kind in EDITORIAL_KINDS)
+    )
+    if not selected_kinds:
+        return 0
+
     local_tz = timezone(timedelta(hours=offset_hours))
     local_now = datetime.now(local_tz)
     local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_start = local_midnight.astimezone(timezone.utc).isoformat(timespec="seconds")
+    placeholders = ", ".join("?" for _ in selected_kinds)
+    chat_filter = " AND target_chat_id = ?" if target_chat_id is not None else ""
+    params: list[Any] = [*selected_kinds, utc_start]
+    if target_chat_id is not None:
+        params.append(target_chat_id)
+
     async with db.connect() as connection:
         cursor = await connection.execute(
-            """
+            f"""
             SELECT COUNT(*) AS total
             FROM publication_log
-            WHERE kind IN ('guide', 'hero', 'squad', 'event', 'alliance')
+            WHERE kind IN ({placeholders})
               AND status = 'published'
               AND auto_published = 1
               AND published_at >= ?
+              {chat_filter}
             """,
-            (utc_start,),
+            params,
         )
         row = await cursor.fetchone()
         return int(row["total"] if row else 0)
+
+
+async def latest_auto_editorial_publication_at(
+    db: Database,
+    *,
+    kind: str,
+    target_chat_id: int | None = None,
+) -> str | None:
+    if kind not in EDITORIAL_KINDS:
+        raise ValueError(f"Неподдерживаемый тип контента: {kind}")
+
+    chat_filter = " AND target_chat_id = ?" if target_chat_id is not None else ""
+    params: list[Any] = [kind]
+    if target_chat_id is not None:
+        params.append(target_chat_id)
+
+    async with db.connect() as connection:
+        cursor = await connection.execute(
+            f"""
+            SELECT published_at
+            FROM publication_log
+            WHERE kind = ?
+              AND status = 'published'
+              AND auto_published = 1
+              {chat_filter}
+            ORDER BY published_at DESC, id DESC
+            LIMIT 1
+            """,
+            params,
+        )
+        row = await cursor.fetchone()
+
+    if row is None or not row["published_at"]:
+        return None
+    return str(row["published_at"])
 
 
 async def count_recent_suggestions(
